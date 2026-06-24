@@ -74,6 +74,18 @@ const ACCESSORY_SUBCATS = [
 const AESTHETICS = ["Streetwear","Minimalist","Coquette","Clean Girl","Dark Academia","Grunge","Soft Girl","Cottagecore","Y2K","Romantic Feminine","Boho","Angelcore","Baddie","Hipster","Indie","Kawaii"];
 const OCCASIONS = ["School Day","Business Meeting","Date Night","Casual Hangout","Party"];
 
+const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
+
+/* Colors the user can pick for an item (name + swatch). */
+const COLOR_CHOICES = [
+  ["Black","#222222"],["Charcoal","#454545"],["Gray","#9aa0a6"],["White","#f3f3f3"],
+  ["Cream","#f2e8d4"],["Beige","#e1d2b5"],["Tan","#c8a978"],["Brown","#7a5230"],
+  ["Maroon","#7a2730"],["Red","#cc3b3b"],["Pink","#e892b5"],["Light Pink","#f3c6dc"],
+  ["Mauve","#b896a0"],["Purple","#8a5cc0"],["Navy","#27345a"],["Blue","#3a6bd6"],
+  ["Light Blue","#9fc8e6"],["Teal","#2f9c9c"],["Green","#4f9e6a"],["Olive","#7d7f48"],
+  ["Dark Green","#2f5d3a"],["Yellow","#e6c14a"],["Orange","#e08a3c"],["Neutral","#bbbbbb"],
+];
+
 const CAT_ICON = {
   Tops: Shirt, Bottoms: Layers, Shoes: Footprints, Outerwear: Shirt, Accessories: Watch,
   Bags: ShoppingBag, "Headwear & Neckwear": Crown, Jewelry: Watch, Belts: Layers,
@@ -410,22 +422,49 @@ const KOREAN_PHOTOS = [
   "https://images.unsplash.com/photo-1502716119720-b23a93e5fe1b?auto=format&fit=crop&w=600&q=70",
 ];
 
-function makeNote(items, baseStyle){
-  const top=items.find(i=>i.category==="Tops"),bottom=items.find(i=>i.category==="Bottoms"),
-        shoe=items.find(i=>i.category==="Shoes"),outer=items.find(i=>i.category==="Outerwear"),
+/* Build a varied, contextual stylist note: silhouette cue + layering + how it
+   fits the vibe/aesthetic/occasion/weather. Rotates phrasing by outfit index so
+   the five looks don't read the same. */
+function makeNote(items, ctx){
+  ctx = ctx || {};
+  const idx = ctx.idx || 0;
+  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const top=items.find(i=>i.category==="Tops"), bottom=items.find(i=>i.category==="Bottoms"),
+        outer=items.find(i=>i.category==="Outerwear"), shoe=items.find(i=>i.category==="Shoes"),
         extra=items.find(i=>i.category==="Accessories");
-  const parts=[];
-  if(top&&bottom)parts.push(`your ${top.name.toLowerCase()} half-tucked into the ${bottom.name.toLowerCase()} keeps the line relaxed but intentional`);
-  else if(top)parts.push(`let the ${top.name.toLowerCase()} be the whole moment and keep everything around it quiet`);
-  else if(bottom)parts.push(`build the look around the ${bottom.name.toLowerCase()} with a fitted layer up top`);
-  if(outer)parts.push(`throw the ${outer.name.toLowerCase()} on open with the sleeves pushed up`);
-  if(shoe)parts.push(`the ${shoe.name.toLowerCase()} ground it with an easy, off-duty edge`);
-  if(extra)parts.push(`finish with the ${extra.name.toLowerCase()} so it feels put-together, never fussy`);
-  const flavor = baseStyle==="Korean"
-    ? " Lean into clean, trend-forward Korean-street lines."
-    : baseStyle==="Cali" ? " Keep it sun-washed and California-easy." : "";
-  const s=parts.join(", ");
-  return (s ? s.charAt(0).toUpperCase()+s.slice(1)+"." : "An effortless, pulled-together look from your closet.") + flavor;
+  const nm = (it) => it ? it.name.toLowerCase() : "";
+  let cues;
+  if(top&&bottom) cues=[
+    `half-tuck the ${nm(top)} into the ${nm(bottom)} and cuff the hem`,
+    `let the ${nm(top)} sit relaxed over the ${nm(bottom)}`,
+    `tuck the ${nm(top)} in to define the waist with the ${nm(bottom)}`];
+  else if(top) cues=[`make the ${nm(top)} the hero and keep the rest quiet`, `let the ${nm(top)} do all the talking`];
+  else if(bottom) cues=[`build around the ${nm(bottom)} with a fitted layer up top`];
+  else cues=[`keep the proportions balanced and easy`];
+  let body = cap(cues[idx % cues.length]) + ".";
+  const adds = [];
+  if(outer) adds.push(`throw the ${nm(outer)} on open`);
+  if(shoe) adds.push(`let the ${nm(shoe)} ground it`);
+  if(extra) adds.push(`finish with the ${nm(extra)}`);
+  if(adds.length) body += " " + cap(adds.join(", ")) + ".";
+  const baseTxt = ctx.baseStyle==="Korean" ? "crisp, trend-forward Korean-street polish"
+                : ctx.baseStyle==="Cali" ? "sun-washed California ease" : "an effortless, pulled-together feel";
+  const aes = ctx.aesthetic ? ctx.aesthetic.toLowerCase() : "";
+  let vibe = "It leans into " + baseTxt + (aes ? " with a " + aes + " touch" : "");
+  const tails = [];
+  if(ctx.occasion) tails.push("right for " + ctx.occasion.toLowerCase());
+  const w = ctx.weather;
+  if(w && w.temp!=null){
+    let wa;
+    if(w.temp<=45) wa = "warm enough for the " + w.temp + "° chill";
+    else if(w.temp<=60) wa = "layered for the " + w.temp + "° " + w.condition.toLowerCase();
+    else if(w.temp<=78) wa = "easy in the " + w.temp + "° " + w.condition.toLowerCase();
+    else wa = "breezy for the " + w.temp + "° heat";
+    tails.push(wa);
+  }
+  if(tails.length) vibe += " — " + tails.join(", and ");
+  vibe += ".";
+  return body + " " + vibe;
 }
 
 /* Compose up to 5 coherent outfits from real closet items.
@@ -451,6 +490,9 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
     else { plan.push({a:preferred[i%preferred.length],familiar:true}); }
   }
   const basePhotos = opts.baseStyle==="Korean" ? KOREAN_PHOTOS : CALI_PHOTOS;
+  // Weather-aware: skip outerwear when it's warm out.
+  const wTemp = opts.weather && opts.weather.temp;
+  const wantOuter = (wTemp==null) || wTemp <= 72;
 
   const outfits=[],used=new Set();
   const at=arr=>arr.length?arr:[null];
@@ -464,7 +506,7 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
       title:OUTFIT_TITLES[outfits.length%OUTFIT_TITLES.length],
       aesthetic:(opts.baseStyle?opts.baseStyle+" · ":"")+pe.a,
       img:basePhotos[outfits.length%basePhotos.length],
-      note:makeNote(items,opts.baseStyle),
+      note:makeNote(items,{ baseStyle:opts.baseStyle, aesthetic:pe.a, occasion:opts.occasion, weather:opts.weather, idx:outfits.length }),
       items:items.map(i=>({id:i.id,name:i.name,category:i.category,photo:i.photo})),
       familiar:pe.familiar,
     });
@@ -474,14 +516,14 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
       const k=ti+bi;
       const set=[T[ti],B[bi],
         shoes.length?shoes[k%shoes.length]:null,
-        outer.length?outer[k%outer.length]:null,
+        (outer.length&&wantOuter)?outer[k%outer.length]:null,
         acc.length?acc[k%acc.length]:null,
         acc.length>1?acc[(k+1)%acc.length]:null];
       push(set);
     }
   }
   for(let ti=0;ti<T.length&&outfits.length<5;ti++){
-    push([T[ti],shoes[0]||null,acc[0]||null,acc[1]||null,outer[0]||null]);
+    push([T[ti],shoes[0]||null,acc[0]||null,acc[1]||null,(wantOuter?outer[0]:null)||null]);
   }
   return outfits.slice(0,5);
 }
@@ -582,19 +624,71 @@ const OUTFIT_TEMPLATES = [
 
 /* ================= COMPONENTS ================= */
 
-function WeatherBar() {
+/* --- live weather (Open-Meteo, no API key; geolocation, with IP fallback) --- */
+function weatherDesc(code, temp){
+  let condition = "Clear", icon = "sun";
+  if(code===0){ condition="Clear"; icon="sun"; }
+  else if(code<=2){ condition="Partly cloudy"; icon="sun"; }
+  else if(code===3){ condition="Cloudy"; icon="cloud"; }
+  else if(code===45||code===48){ condition="Foggy"; icon="cloud"; }
+  else if(code>=51&&code<=67){ condition="Rainy"; icon="rain"; }
+  else if(code>=71&&code<=77){ condition="Snowy"; icon="snow"; }
+  else if(code>=80&&code<=82){ condition="Showers"; icon="rain"; }
+  else if(code>=85&&code<=86){ condition="Snow showers"; icon="snow"; }
+  else if(code>=95){ condition="Thunderstorm"; icon="rain"; }
+  let tip = "Dressing for the day.";
+  if(temp!=null){
+    if(temp<=40) tip="Bundle up — a warm coat is a must.";
+    else if(temp<=55) tip="Jacket-and-layers weather.";
+    else if(temp<=68) tip="Light layers — great for a cardigan.";
+    else if(temp<=80) tip="Warm — keep it light and breezy.";
+    else tip="Hot — go airy and minimal.";
+  }
+  return { condition, icon, tip };
+}
+async function fetchWeather(){
+  let lat=null, lon=null, place=null;
+  try {
+    const pos = await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{ timeout:8000, maximumAge:600000 }));
+    lat=pos.coords.latitude; lon=pos.coords.longitude;
+  } catch(e){
+    try { const ip = await (await fetch("https://ipapi.co/json/")).json(); lat=ip.latitude; lon=ip.longitude; place=ip.city; } catch(e2){}
+  }
+  if(lat==null) return null;
+  try {
+    const u = "https://api.open-meteo.com/v1/forecast?latitude="+lat+"&longitude="+lon+"&current=temperature_2m,apparent_temperature,weather_code&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=auto";
+    const w = await (await fetch(u)).json();
+    const cur = w.current||{};
+    const temp = Math.round(cur.temperature_2m);
+    const dmax = w.daily&&w.daily.temperature_2m_max&&w.daily.temperature_2m_max[0];
+    const dmin = w.daily&&w.daily.temperature_2m_min&&w.daily.temperature_2m_min[0];
+    return { temp, feels: Math.round(cur.apparent_temperature), high: Math.round(dmax), low: Math.round(dmin), code: cur.weather_code, place, ...weatherDesc(cur.weather_code, temp) };
+  } catch(e){ return null; }
+}
+function WeatherIcon({ icon, size, color }){
+  return icon==="sun" ? <Sun size={size} color={color} /> : <Cloud size={size} color={color} />;
+}
+
+function WeatherBar({ weather }) {
+  if(!weather){
+    return (
+      <div className="rounded-3xl px-6 py-5 flex items-center gap-3" style={{ background: "linear-gradient(125deg,#E6F0FB,#F1ECFB 55%,#FDE9F1)" }}>
+        <Loader2 size={20} className="animate-spin" color="#8AA6BD" />
+        <div className="text-[13px] font-bold" style={{ color: "#8AA6BD" }}>Getting your local weather…</div>
+      </div>
+    );
+  }
   return (
-    <div className="rounded-3xl px-6 py-5"
-      style={{ background: "linear-gradient(125deg,#E6F0FB,#F1ECFB 55%,#FDE9F1)" }}>
+    <div className="rounded-3xl px-6 py-5" style={{ background: "linear-gradient(125deg,#E6F0FB,#F1ECFB 55%,#FDE9F1)" }}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-14 h-14 rounded-3xl flex items-center justify-center" style={{ background: "#FFF3D1" }}>
-            <Sun size={30} color="#E5A93B" />
+          <div className="w-14 h-14 rounded-3xl flex items-center justify-center" style={{ background: weather.icon==="sun"?"#FFF3D1":"#E2ECF7" }}>
+            <WeatherIcon icon={weather.icon} size={30} color={weather.icon==="sun"?"#E5A93B":"#7FA8CC"} />
           </div>
           <div>
-            <div className="text-[22px] leading-none font-black" style={{ color: "#5D87A8" }}>68°F</div>
+            <div className="text-[22px] leading-none font-black" style={{ color: "#5D87A8" }}>{weather.temp}°F</div>
             <div className="text-[13px] font-bold flex items-center gap-1 mt-1" style={{ color: "#8AA6BD" }}>
-              <Wind size={13} /> Sunny & soft breeze
+              <Wind size={13} /> {weather.condition}{weather.place ? " · " + weather.place : ""}
             </div>
           </div>
         </div>
@@ -603,19 +697,19 @@ function WeatherBar() {
       <div className="flex items-center gap-2 mt-4">
         <div className="flex-1 rounded-2xl px-3 py-2 text-center" style={{ background: "#ffffff80" }}>
           <div className="text-[11px] font-bold" style={{ color: "#A9B8C8" }}>HIGH</div>
-          <div className="text-[15px] font-black" style={{ color: "#5D87A8" }}>72°</div>
+          <div className="text-[15px] font-black" style={{ color: "#5D87A8" }}>{weather.high}°</div>
         </div>
         <div className="flex-1 rounded-2xl px-3 py-2 text-center" style={{ background: "#ffffff80" }}>
           <div className="text-[11px] font-bold" style={{ color: "#A9B8C8" }}>LOW</div>
-          <div className="text-[15px] font-black" style={{ color: "#5D87A8" }}>61°</div>
+          <div className="text-[15px] font-black" style={{ color: "#5D87A8" }}>{weather.low}°</div>
         </div>
         <div className="flex-1 rounded-2xl px-3 py-2 text-center" style={{ background: "#ffffff80" }}>
           <div className="text-[11px] font-bold" style={{ color: "#A9B8C8" }}>FEELS</div>
-          <div className="text-[15px] font-black" style={{ color: "#5D87A8" }}>70°</div>
+          <div className="text-[15px] font-black" style={{ color: "#5D87A8" }}>{weather.feels}°</div>
         </div>
       </div>
       <div className="text-[12px] font-bold mt-3 flex items-center gap-1.5" style={{ color: "#9D9BC0" }}>
-        <Sparkles size={12} /> Light layers weather — perfect for a cardigan moment.
+        <Sparkles size={12} /> {weather.tip}
       </div>
     </div>
   );
@@ -644,16 +738,28 @@ function PersonGraphic({ pastel, img }) {
 
 /* The outfit "photo" = a moodboard of the user's REAL items, so the image always
    matches the pieces in the look. */
+/* A real online photo of a similar item (matched by color + type from the item's
+   name). Falls back to the user's own cutout if it fails to load. */
+function stockImageUrl(item){
+  const clean = item.name.toLowerCase().replace(/[^a-z ]/g, "").trim().split(/\s+/).filter(Boolean).join(",");
+  let h = 0; for(let i=0;i<item.name.length;i++) h = (h*31 + item.name.charCodeAt(i)) >>> 0;
+  return "https://loremflickr.com/320/380/" + encodeURIComponent(clean + ",clothing") + "?lock=" + (h % 100000);
+}
+function StockImg({ item }) {
+  const [src, setSrc] = useState(stockImageUrl(item));
+  return <img src={src} alt={item.name} className="w-full h-full object-cover"
+    onError={() => { if (item.photo && src !== item.photo) setSrc(item.photo); }} />;
+}
 function OutfitCollage({ items, pastel }) {
   const list = (items || []).slice(0, 5);
   const big = list.length <= 2;
   return (
     <div className="w-full rounded-3xl overflow-hidden relative flex flex-wrap items-center justify-center gap-2 p-3"
       style={{ height: 260, background: pastel.ring + "55" }}>
-      {list.map((it, i) => (
-        <div key={i} className="rounded-2xl overflow-hidden bg-white shadow-sm flex items-center justify-center"
+      {list.map((it) => (
+        <div key={it.id} className="rounded-2xl overflow-hidden bg-white shadow-sm flex items-center justify-center"
           style={{ width: big ? "46%" : "30.5%", height: big ? "88%" : "46%" }}>
-          {it.photo ? <img src={it.photo} alt={it.name} className="w-full h-full object-cover" />
+          {(it.photo || it.name) ? <StockImg item={it} />
                     : <CatIcon category={it.category} size={28} color={pastel.text} />}
         </div>
       ))}
@@ -661,7 +767,7 @@ function OutfitCollage({ items, pastel }) {
   );
 }
 
-function StylistTab({ closet, favorites, toggleFav, prefs }) {
+function StylistTab({ closet, favorites, toggleFav, prefs, weather }) {
   const [occasion, setOccasion] = useState("");
   const [custom, setCustom] = useState("");
   const [outfits, setOutfits] = useState([]);
@@ -680,7 +786,7 @@ function StylistTab({ closet, favorites, toggleFav, prefs }) {
       const favAesthetics = favorites.map((f) => f.aesthetic);
       const likedAesthetics = new Set([...favAesthetics, ...(prefs?.aesthetics || [])]);
       // Build real outfits from the actual closet items.
-      const built = buildOutfits(closet, likedAesthetics, favorites, { tryNew: !!prefs?.tryNew, baseStyle: prefs?.baseStyle });
+      const built = buildOutfits(closet, likedAesthetics, favorites, { tryNew: !!prefs?.tryNew, baseStyle: prefs?.baseStyle, occasion: (custom.trim() || occasion), weather });
       const picked = built.map((o, i) => ({ ...o, pastel: PASTELS[i % PASTELS.length] }));
       setOutfits(picked);
       setGenerating(false);
@@ -689,7 +795,7 @@ function StylistTab({ closet, favorites, toggleFav, prefs }) {
 
   return (
     <div className="pb-40">
-      <WeatherBar />
+      <WeatherBar weather={weather} />
 
       <h1 className="text-[34px] leading-tight font-black mt-10 mb-6" style={{ color: "#5A5167" }}>Outfit ideas, just a click away</h1>
 
@@ -939,7 +1045,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
           <ArrowLeft size={18} /> Categories
         </button>
         <h1 className="text-2xl font-black mb-1" style={{ color: "#5A5167" }}>Accessories</h1>
-        <p className="text-sm font-semibold mb-4" style={{ color: "#A99FB5" }}>{counts["Accessories"]} pieces</p>
+        <p className="text-sm font-semibold mb-4" style={{ color: "#A99FB5" }}>{plural(counts["Accessories"], "piece")}</p>
         <div className="grid grid-cols-2 gap-3">
           {ACCESSORY_SUBCATS.map((s, i) => {
             const Icon = s.icon; const p = PASTELS[i % PASTELS.length];
@@ -951,7 +1057,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
                   <Icon size={20} color={p.text} />
                 </div>
                 <div className="text-[14px] font-black leading-tight" style={{ color: p.text }}>{s.key}</div>
-                <div className="text-[12px] font-bold" style={{ color: p.text + "bb" }}>{subCounts[s.key]} pieces</div>
+                <div className="text-[12px] font-bold" style={{ color: p.text + "bb" }}>{plural(subCounts[s.key], "piece")}</div>
               </button>
             );
           })}
@@ -973,7 +1079,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
           <ArrowLeft size={18} /> {activeSub ? "Accessories" : "Categories"}
         </button>
         <h1 className="text-2xl font-black mb-1" style={{ color: "#5A5167" }}>{title}</h1>
-        <p className="text-sm font-semibold mb-2" style={{ color: "#A99FB5" }}>{items.length} pieces · tap a card to reveal trash</p>
+        <p className="text-sm font-semibold mb-2" style={{ color: "#A99FB5" }}>{plural(items.length, "piece")} · tap a card to reveal trash</p>
         <div className="space-y-3 mt-4">
           {items.length === 0 ? (
             <div className="rounded-3xl p-8 text-center" style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
@@ -1026,7 +1132,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
                   <Icon size={22} color={p.text} />
                 </div>
                 <div className="text-[15px] font-black" style={{ color: p.text }}>{c.key}</div>
-                <div className="text-[12px] font-bold" style={{ color: p.text + "bb" }}>{counts[c.key]} pieces</div>
+                <div className="text-[12px] font-bold" style={{ color: p.text + "bb" }}>{plural(counts[c.key], "piece")}</div>
               </button>
             );
           })}
@@ -1038,7 +1144,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
               <Trash2 size={22} color="#A99FB5" />
             </div>
             <div className="text-[15px] font-black" style={{ color: "#8A7FA0" }}>Trash</div>
-            <div className="text-[12px] font-bold" style={{ color: "#A99FB5" }}>{trash.length} items</div>
+            <div className="text-[12px] font-bold" style={{ color: "#A99FB5" }}>{plural(trash.length, "item")}</div>
           </button>
         </div>
       )}
@@ -1052,6 +1158,7 @@ function useCamera(active = true) {
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const [camState, setCamState] = useState("starting"); // starting | live | denied | unavailable
+  const [facing, setFacing] = useState("environment"); // "environment" (back) | "user" (front)
 
   const stopStream = () => {
     if (streamRef.current) {
@@ -1060,15 +1167,17 @@ function useCamera(active = true) {
     }
   };
 
-  const startCamera = async () => {
+  const startCamera = async (mode) => {
+    const want = mode || facing;
     setCamState("starting");
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setCamState("unavailable");
       return;
     }
+    stopStream();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
+        video: { facingMode: { ideal: want } },
         audio: false,
       });
       streamRef.current = stream;
@@ -1080,6 +1189,12 @@ function useCamera(active = true) {
     } catch (err) {
       setCamState(err && err.name === "NotAllowedError" ? "denied" : "unavailable");
     }
+  };
+
+  const flipCamera = () => {
+    const next = facing === "environment" ? "user" : "environment";
+    setFacing(next);
+    startCamera(next);
   };
 
   useEffect(() => {
@@ -1113,11 +1228,11 @@ function useCamera(active = true) {
     return null;
   };
 
-  return { videoRef, canvasRef, camState, startCamera, capture, stopStream };
+  return { videoRef, canvasRef, camState, facing, startCamera, flipCamera, capture, stopStream };
 }
 
 function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial }) {
-  const { videoRef, canvasRef, camState, startCamera, capture } = useCamera(active);
+  const { videoRef, canvasRef, camState, facing, startCamera, flipCamera, capture } = useCamera(active);
   const fileRef = useRef(null);
   const [scanning, setScanning] = useState(false);
   const [stage, setStage] = useState("");
@@ -1125,6 +1240,7 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial }) {
   const [results, setResults] = useState(null); // [{name, category, subcategory, color, photo}]
   const [error, setError] = useState(null);
   const [picker, setPicker] = useState(null); // index of the item whose category picker is open
+  const [colorPicker, setColorPicker] = useState(null); // index of the item whose color picker is open
   const [loadPct, setLoadPct] = useState(0);
   useEffect(() => onModelProgress(setLoadPct), []);
 
@@ -1143,6 +1259,7 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial }) {
 
   const removeItem = (i) => setResults((rs) => { const next = (rs || []).filter((_, j) => j !== i); return next.length ? next : null; });
   const renameItem = (i, name) => setResults((rs) => rs.map((r, j) => j === i ? { ...r, name } : r));
+  const setItemColor = (i, color) => setResults((rs) => rs.map((r, j) => j === i ? { ...r, color } : r));
 
   // Auto-scan a photo handed in from onboarding ("Snap your closet").
   useEffect(() => {
@@ -1264,6 +1381,15 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial }) {
         {scanning && (
           <div className="absolute left-0 right-0 h-1" style={{ background: "#F8A7C5", boxShadow: "0 0 16px 4px #F8A7C5", animation: "scan 1.5s linear infinite" }} />
         )}
+
+        {/* flip front/back camera */}
+        {camState === "live" && !photo && !scanning && (
+          <button onClick={flipCamera} aria-label="switch camera"
+            className="absolute top-3 right-3 w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+            style={{ background: "#ffffffd0" }}>
+            <RotateCcw size={18} color="#5A5167" />
+          </button>
+        )}
       </div>
 
       {/* hidden upload input */}
@@ -1319,7 +1445,10 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial }) {
                     <button onClick={() => setPicker(i)} className="px-2 py-0.5 rounded-full text-[10px] font-extrabold flex items-center gap-1" style={{ background: "#FDE9F1", color: "#C56B96" }}>
                       {r.category}{r.subcategory ? " · " + r.subcategory : ""} <ChevronDown size={10} />
                     </button>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold" style={{ background: "#F1ECFB", color: "#8E78C0" }}>{r.color}</span>
+                    <button onClick={() => setColorPicker(i)} className="px-2 py-0.5 rounded-full text-[10px] font-extrabold flex items-center gap-1" style={{ background: "#F1ECFB", color: "#8E78C0" }}>
+                      <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: (COLOR_CHOICES.find((c) => c[0] === r.color) || ["", "#bbb"])[1], border: "1px solid #00000022" }} />
+                      {r.color} <ChevronDown size={10} />
+                    </button>
                   </div>
                 </div>
                 <button onClick={() => removeItem(i)} aria-label="remove item"
@@ -1375,6 +1504,30 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial }) {
               </>
             )}
             <button onClick={() => setPicker(null)} className="w-full mt-6 py-3 rounded-2xl text-white font-black" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>Done</button>
+          </div>
+        </div>
+      )}
+
+      {/* Color picker sheet */}
+      {colorPicker !== null && results && results[colorPicker] && (
+        <div className="fixed inset-0 z-50 flex items-end" style={{ background: "#00000055" }} onClick={() => setColorPicker(null)}>
+          <div className="w-full rounded-t-3xl p-5 pb-9 mx-auto" style={{ maxWidth: 430, background: "#fff" }} onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full" style={{ background: "#EFE3F0" }} />
+            <div className="text-[16px] font-black mb-3" style={{ color: "#5A5167" }}>What color is it?</div>
+            <div className="flex flex-wrap gap-2">
+              {COLOR_CHOICES.map(([name, hex]) => {
+                const on = results[colorPicker].color === name;
+                return (
+                  <button key={name} onClick={() => setItemColor(colorPicker, name)}
+                    className="px-3 py-2 rounded-full text-[12px] font-extrabold flex items-center gap-1.5 active:scale-95 transition-all"
+                    style={{ background: on ? "#FDE9F1" : "#F4EEF5", color: on ? "#C56B96" : "#6E6480", outline: on ? "2px solid #F3A7CB" : "2px solid transparent" }}>
+                    <span className="inline-block w-3 h-3 rounded-full" style={{ background: hex, border: "1px solid #00000022" }} />
+                    {name}
+                  </button>
+                );
+              })}
+            </div>
+            <button onClick={() => setColorPicker(null)} className="w-full mt-6 py-3 rounded-2xl text-white font-black" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>Done</button>
           </div>
         </div>
       )}
@@ -1609,7 +1762,7 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
         <div>
           <div className="text-[18px] font-black" style={{ color: "#5A5167" }}>My style</div>
           <div className="text-[13px] font-bold" style={{ color: "#A99FB5" }}>
-            {closetCount} pieces · {aesthetics.length} aesthetic{aesthetics.length !== 1 ? "s" : ""} · {favorites.length} saved
+            {plural(closetCount, "piece")} · {plural(aesthetics.length, "aesthetic")} · {favorites.length} saved
           </div>
         </div>
       </div>
@@ -1734,6 +1887,7 @@ function App() {
   const [prefs, setPrefs] = useState({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false });
   const [tab, setTab] = useState("stylist");
   const [pendingPhoto, setPendingPhoto] = useState(null); // onboarding photo to auto-scan
+  const [weather, setWeather] = useState(null);
   const [closet, setCloset] = useState(SEED);
   const [trash, setTrash] = useState(SEED_TRASH);
   const [favorites, setFavorites] = useState([]);
@@ -1768,6 +1922,9 @@ function App() {
     (async () => {
       try { await Promise.allSettled([getDetector(), getClassifier()]); } catch (e) { /* ignore */ }
     })();
+
+    // Pull the real local weather (asks for location; falls back to IP).
+    fetchWeather().then((w) => { if (w) setWeather(w); }).catch(() => {});
   }, []);
 
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 1800); };
@@ -1804,7 +1961,7 @@ function App() {
     <div style={{ fontFamily: "'Nunito', sans-serif", background: "linear-gradient(180deg,#FDF1F6,#F1F4FC)", minHeight: "100vh" }}>
       <div className="mx-auto relative" style={{ maxWidth: 430, minHeight: "100vh", background: "linear-gradient(180deg,#FFFCFE,#FBFAFF)" }}>
         <div className="px-5 pt-8">
-          {tab === "stylist" && <StylistTab closet={closet} favorites={favorites} toggleFav={toggleFav} prefs={prefs} />}
+          {tab === "stylist" && <StylistTab closet={closet} favorites={favorites} toggleFav={toggleFav} prefs={prefs} weather={weather} />}
           {tab === "closet" && (
             <ClosetTab closet={closet} setCloset={setCloset} trash={trash} setTrash={setTrash} goCamera={() => setTab("camera")} />
           )}
