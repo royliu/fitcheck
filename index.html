@@ -1,0 +1,1852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>FitCheck</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+<style>
+  html, body, #root { height: 100%; margin: 0; }
+  /* Always reserve the scrollbar gutter so the centered app doesn't shift
+     sideways between short tabs (Stylist/Profile) and tall ones (Closet). */
+  html { overflow-y: scroll; }
+  body { background: linear-gradient(180deg,#FDF1F6,#F1F4FC); -webkit-font-smoothing: antialiased; }
+  #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-family: system-ui, sans-serif; color: #C56B96; font-weight: 800; font-size: 18px; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.3.1",
+    "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
+    "react-dom": "https://esm.sh/react-dom@18.3.1",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+    "lucide-react": "https://esm.sh/lucide-react@0.383.0?deps=react@18.3.1",
+    "onnxruntime-web": "https://esm.sh/onnxruntime-web@1.20.1",
+    "@huggingface/transformers": "https://esm.sh/@huggingface/transformers@3.3.3"
+  }
+}
+</script>
+</head>
+<body>
+<div id="root"></div>
+<div id="loading">Loading FitCheck…</div>
+
+<script type="text/babel" data-type="module" data-presets="react">
+import React, { useState, useEffect, useRef } from "react";
+import {
+  Sparkles, Search, Heart, Trash2, RotateCcw, Camera as CameraIcon,
+  Shirt, Plus, ChevronDown, Sun, Wind, X, Check, Footprints,
+  ShoppingBag, Crown, Watch, Layers, WashingMachine, ArrowLeft, ArrowRight, Loader2, Cloud, User,
+} from "lucide-react";
+import { createRoot } from "react-dom/client";
+
+/* ---------- Theme ---------- */
+const CREAM = "#FFFCFB";
+const PASTELS = [
+  { bg: "#FDE9F1", ring: "#FBD0E2", text: "#C56B96" }, // baby pink
+  { bg: "#FFF6DE", ring: "#FCEBB8", text: "#C39A3E" }, // soft butter
+  { bg: "#F1ECFB", ring: "#DDD0F2", text: "#8E78C0" }, // soft lavender
+  { bg: "#E6F2FB", ring: "#CBE5F6", text: "#6B9AC0" }, // baby blue
+  { bg: "#E8F6EC", ring: "#CDEBD5", text: "#6BA37C" }, // soft mint
+  { bg: "#FCEDE6", ring: "#FAD8C8", text: "#CC8567" }, // soft peach
+];
+
+const CATEGORIES = [
+  { key: "Tops", icon: Shirt },
+  { key: "Bottoms", icon: Layers },
+  { key: "Shoes", icon: Footprints },
+  { key: "Outerwear", icon: Shirt },
+  { key: "Accessories", icon: Watch },
+];
+
+/* Sub-categories that live UNDER "Accessories". */
+const ACCESSORY_SUBCATS = [
+  { key: "Bags", icon: ShoppingBag },
+  { key: "Headwear & Neckwear", icon: Crown },
+  { key: "Jewelry", icon: Watch },
+  { key: "Belts", icon: Layers },
+  { key: "Hair Accessories", icon: Sparkles },
+  { key: "Glasses", icon: Search },
+];
+
+const AESTHETICS = ["Streetwear","Minimalist","Coquette","Clean Girl","Dark Academia","Grunge","Soft Girl","Cottagecore","Y2K","Romantic Feminine","Boho","Angelcore","Baddie","Hipster","Indie","Kawaii"];
+const OCCASIONS = ["School Day","Business Meeting","Date Night","Casual Hangout","Party"];
+
+const CAT_ICON = {
+  Tops: Shirt, Bottoms: Layers, Shoes: Footprints, Outerwear: Shirt, Accessories: Watch,
+  Bags: ShoppingBag, "Headwear & Neckwear": Crown, Jewelry: Watch, Belts: Layers,
+  "Hair Accessories": Sparkles, Glasses: Search,
+};
+const CatIcon = ({ category, size = 24, color }) => {
+  const I = CAT_ICON[category] || Shirt;
+  return <I size={size} color={color} />;
+};
+
+/* ---------- Seed Data ---------- */
+/* Closet starts empty — items are added by capturing them in the Camera tab. */
+let _id = 0;
+const uid = () => `item_${_id++}`;
+const mk = (name, category, color, fav = false, wash = false) =>
+  ({ id: uid(), name, category, color, fav, wash });
+
+const SEED = [];
+const SEED_TRASH = [];
+
+/* ================= REAL CLOTHING DETECTION (in-browser, onnxruntime-web) =================
+   Fashion object detector: yainage90/fashion-object-detection (Conditional DETR),
+   converted to ONNX (int8 ~44MB), run fully in the browser via onnxruntime-web.
+   Detects whole garments as objects -> works on worn outfits AND items laid out /
+   held up / partially occluded (no full-body shot required). */
+// The 167MB model is split into <100MB parts (GitHub's per-file limit) and
+// stitched back together at load time.
+const DETECTOR_PARTS = ["./fashion-detector.onnx.part0", "./fashion-detector.onnx.part1"];
+const DETECTOR_TOTAL = 174424033;
+const DETECTOR_URL = (typeof window !== "undefined" && window.FITCHECK_MODEL_URL) || "./fashion-detector.onnx";
+const DET_LABELS = ["bag", "bottom", "dress", "hat", "outer", "shoes", "top"];
+const DET_MAP = {
+  bag:    { category: "Accessories", sub: "Bags",                noun: "Bag" },
+  bottom: { category: "Bottoms",                                 noun: "Bottoms" },
+  dress:  { category: "Tops",                                    noun: "Dress" },
+  hat:    { category: "Accessories", sub: "Headwear & Neckwear", noun: "Hat" },
+  outer:  { category: "Outerwear",                               noun: "Outerwear" },
+  shoes:  { category: "Shoes",                                   noun: "Shoes" },
+  top:    { category: "Tops",                                    noun: "Top" },
+};
+const DET_MEAN = [0.485, 0.456, 0.406], DET_STD = [0.229, 0.224, 0.225];
+const DET_SHORTEST = 640, DET_LONGEST = 1333, DET_THRESHOLD = 0.3;
+
+// --- model-load progress (so the scan screen can show a real % bar) ---
+let _dlDet = 0, _dlClip = 0;
+const _mpSubs = new Set();
+function modelProgress(){ return 0.6 * _dlDet + 0.4 * _dlClip; }
+function emitModelProgress(){ const p = modelProgress(); _mpSubs.forEach((f) => f(p)); }
+function onModelProgress(fn){ _mpSubs.add(fn); fn(modelProgress()); return () => _mpSubs.delete(fn); }
+
+let _ort = null, _ortSession = null;
+async function getDetector(onStage) {
+  if (!_ort) {
+    onStage && onStage("Loading AI model…");
+    _ort = await import("onnxruntime-web");
+    _ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+  }
+  if (!_ortSession) {
+    onStage && onStage("Loading AI model…");
+    let buf = null;
+    try {
+      let received = 0; const chunks = [];
+      for (const url of DETECTOR_PARTS) {
+        const resp = await fetch(url);
+        if (resp.body && resp.body.getReader) {
+          const reader = resp.body.getReader();
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value); received += value.length;
+            _dlDet = Math.min(1, received / DETECTOR_TOTAL); emitModelProgress();
+          }
+        } else {
+          const ab = new Uint8Array(await resp.arrayBuffer());
+          chunks.push(ab); received += ab.length;
+          _dlDet = Math.min(1, received / DETECTOR_TOTAL); emitModelProgress();
+        }
+      }
+      const u8 = new Uint8Array(received); let off = 0;
+      for (const c of chunks) { u8.set(c, off); off += c.length; }
+      buf = u8.buffer;
+      _dlDet = 1; emitModelProgress();
+    } catch (e) { buf = null; }
+    _ortSession = await _ort.InferenceSession.create(buf || DETECTOR_URL, { executionProviders: ["wasm"] });
+    _dlDet = 1; emitModelProgress();
+  }
+  return _ortSession;
+}
+
+function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
+function iou(a, b) {
+  const x1 = Math.max(a[0], b[0]), y1 = Math.max(a[1], b[1]), x2 = Math.min(a[2], b[2]), y2 = Math.min(a[3], b[3]);
+  const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  const ua = (a[2]-a[0])*(a[3]-a[1]) + (b[2]-b[0])*(b[3]-b[1]) - inter;
+  return ua > 0 ? inter / ua : 0;
+}
+
+/* --- detailed garment labelling (CLIP zero-shot; optional 2nd model) --- */
+const DETAIL_CANDIDATES = {
+  top:["t-shirt","tank top","crop top","blouse","button-up shirt","knit sweater","hoodie","sweatshirt","cardigan","polo shirt","camisole","turtleneck"],
+  bottom:["denim jeans","skinny jeans","wide-leg jeans","trousers","leggings","sweatpants","cargo pants","mini skirt","midi skirt","pleated skirt","denim shorts","shorts"],
+  dress:["mini dress","midi dress","maxi dress","slip dress","shirt dress","sundress","knit dress","bodycon dress"],
+  outer:["denim jacket","leather jacket","blazer","bomber jacket","puffer jacket","trench coat","wool coat","cardigan","windbreaker"],
+  shoes:["sneakers","boots","ankle boots","heels","sandals","loafers","ballet flats","mary janes","mules"],
+  bag:["shoulder bag","tote bag","crossbody bag","backpack","clutch","handbag","mini bag"],
+  hat:["beanie","baseball cap","bucket hat","beret","wide-brim hat"],
+};
+let _clipMod=null,_clip=null;
+async function getClassifier(onStage){
+  if(!_clipMod){ onStage&&onStage("Loading detail model…"); _clipMod=await import("@huggingface/transformers"); _clipMod.env.allowLocalModels=false; }
+  if(!_clip){
+    _clip=await _clipMod.pipeline("zero-shot-image-classification","Xenova/clip-vit-base-patch32",{
+      progress_callback:(x)=>{ if(x&&x.status==="progress"&&x.total){ _dlClip=Math.min(1,(x.loaded||0)/x.total); emitModelProgress(); } },
+    });
+    _dlClip=1; emitModelProgress();
+  }
+  return _clip;
+}
+function titleCase(s){ return s.replace(/\b\w/g,c=>c.toUpperCase()); }
+/* Refine each item's noun into a detailed garment type. Best-effort: keeps the
+   coarse label if the detail model is unsure or fails to load. */
+async function refineLabels(items, onStage){
+  try{
+    const clf=await getClassifier(onStage);
+    onStage&&onStage("Naming your pieces…");
+    for(const it of items){
+      const cand=DETAIL_CANDIDATES[it.detLabel]; if(!cand) continue;
+      const out=await clf(it.photo, cand, { hypothesis_template:"a photo of a {}" });
+      if(out&&out[0]&&out[0].score>0.18){ it.noun=titleCase(out[0].label); it.name=it.color+" "+it.noun; }
+    }
+  }catch(e){ /* keep coarse labels */ }
+  return items;
+}
+
+const COLOR_PALETTE = [
+  ["Black",25,25,25],["White",245,245,245],["Gray",130,130,130],["Navy",30,40,80],
+  ["Blue",50,90,200],["Light Blue",125,175,220],["Red",200,45,45],["Pink",232,150,175],
+  ["Light Pink",236,200,205],["Mauve",190,150,152],["Orange",230,140,50],["Yellow",232,210,85],
+  ["Green",60,140,85],["Olive",110,120,70],["Brown",120,80,50],["Tan",200,170,130],
+  ["Beige",225,210,185],["Cream",242,232,212],["Purple",135,85,165],
+];
+function nearestColor(r,g,b){let n="Neutral",d=1e9;for(const[name,pr,pg,pb]of COLOR_PALETTE){const e=(r-pr)**2+(g-pg)**2+(b-pb)**2;if(e<d){d=e;n=name;}}return n;}
+
+/* --- lighting-robust color naming --- */
+function rgb2hsv(r,g,b){r/=255;g/=255;b/=255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b),dd=mx-mn;let h=0;if(dd){if(mx===r)h=((g-b)/dd)%6;else if(mx===g)h=(b-r)/dd+2;else h=(r-g)/dd+4;h*=60;if(h<0)h+=360;}return[h,mx?dd/mx:0,mx];}
+/* Gray-world white-balance gains from the whole image, gently clamped, to undo
+   warm/cool lighting casts before naming a garment's color. */
+function whiteBalanceGains(srcCanvas){
+  const c=document.createElement("canvas");c.width=32;c.height=32;
+  c.getContext("2d").drawImage(srcCanvas,0,0,32,32);
+  const d=c.getContext("2d").getImageData(0,0,32,32).data;let r=0,g=0,b=0,n=0;
+  for(let p=0;p<d.length;p+=4){r+=d[p];g+=d[p+1];b+=d[p+2];n++;}
+  r/=n;g/=n;b/=n;const gray=(r+g+b)/3,cl=x=>Math.max(0.78,Math.min(1.3,x));
+  return [cl(gray/(r||1)),cl(gray/(g||1)),cl(gray/(b||1))];
+}
+/* Name a color from HSV — hue is far more stable under brightness changes than RGB. */
+function classifyColor(r,g,b){
+  const [h,s,v]=rgb2hsv(r,g,b);
+  // Dark or low-saturation colors are neutral — tiny channel noise gives dark
+  // pixels a fake hue, so resolve those to black/charcoal/gray FIRST.
+  if(v<0.20)return"Black";
+  if(s<0.16){ if(v>0.85)return"White"; return v<0.45?"Charcoal":"Gray"; }
+  if(s<0.28&&v<0.42)return"Charcoal";
+  if(s<0.30&&v>0.62){ if(h>=18&&h<70)return v>0.82?"Cream":"Beige"; if(h>=200&&h<260)return"Light Blue"; if(h>=290||h<18)return"Light Pink"; }
+  if(h<16||h>=345)return v<0.45?"Maroon":"Red";
+  if(h>=16&&h<45){ if(v<0.45)return"Brown"; if(s<0.55&&v>0.7)return v>0.85?"Cream":"Tan"; return"Orange"; }
+  if(h>=45&&h<70)return s<0.5?"Beige":"Yellow";
+  if(h>=70&&h<165)return v<0.4?"Dark Green":((h<105&&v<0.62)?"Olive":"Green");
+  if(h>=165&&h<200)return"Teal";
+  if(h>=200&&h<258){ if(v<0.4)return"Navy"; return(v>0.8&&s<0.5)?"Light Blue":"Blue"; }
+  if(h>=258&&h<295)return"Purple";
+  return(v>0.8&&s<0.55)?"Light Pink":"Pink";
+}
+/* Dominant quantized color across one or more sample regions of the source. */
+function sampleDominant(sx, regions){
+  const buckets=new Map();
+  for(const [rx,ry,rw,rh] of regions){
+    if(rw<1||rh<1) continue;
+    const id=sx.getImageData(rx,ry,rw,rh).data;
+    for(let p=0;p<id.length;p+=4){
+      const key=(id[p]>>5)+"_"+(id[p+1]>>5)+"_"+(id[p+2]>>5);
+      const e=buckets.get(key)||[0,0,0,0]; e[0]+=id[p];e[1]+=id[p+1];e[2]+=id[p+2];e[3]++; buckets.set(key,e);
+    }
+  }
+  let best=null; for(const e of buckets.values()){ if(!best||e[3]>best[3]) best=e; }
+  return best?[best[0]/best[3],best[1]/best[3],best[2]/best[3]]:null;
+}
+
+function loadImage(src){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=src;});}
+
+/* Resize (shortest=640, longest<=1333) + ImageNet-normalize into a CHW float tensor. */
+function preprocessForDetector(img){
+  const W=img.naturalWidth,H=img.naturalHeight;
+  let s=DET_SHORTEST/Math.min(W,H);
+  if(Math.max(W,H)*s>DET_LONGEST) s=DET_LONGEST/Math.max(W,H);
+  const w=Math.round(W*s),h=Math.round(H*s);
+  const c=document.createElement("canvas");c.width=w;c.height=h;
+  const cx=c.getContext("2d",{willReadFrequently:true});cx.drawImage(img,0,0,w,h);
+  const d=cx.getImageData(0,0,w,h).data;
+  const plane=w*h, data=new Float32Array(3*plane);
+  for(let i=0;i<plane;i++){
+    data[i]        =((d[i*4]  /255)-DET_MEAN[0])/DET_STD[0];
+    data[plane+i]  =((d[i*4+1]/255)-DET_MEAN[1])/DET_STD[1];
+    data[2*plane+i]=((d[i*4+2]/255)-DET_MEAN[2])/DET_STD[2];
+  }
+  return {data,h,w};
+}
+
+const CAT_COLORS={Tops:"#E891B5",Bottoms:"#8E78C0",Shoes:"#6B9AC0",Outerwear:"#6BA37C",Accessories:"#C39A3E"};
+
+/* Draw labeled boxes over the photo so the user SEES what was identified. */
+function annotatePhoto(img,W,H,items){
+  const ac=document.createElement("canvas");ac.width=W;ac.height=H;
+  const ax=ac.getContext("2d");ax.drawImage(img,0,0,W,H);
+  const fs=Math.max(15,Math.round(W/32));
+  ax.lineWidth=Math.max(3,Math.round(W/170));
+  ax.font="700 "+fs+"px system-ui, sans-serif";ax.textBaseline="top";
+  for(const it of items){
+    const [x1,y1,x2,y2]=it.bbox;const col=CAT_COLORS[it.category]||"#E891B5";
+    ax.strokeStyle=col;ax.strokeRect(x1,y1,x2-x1,y2-y1);
+    const label=it.name;const tw=ax.measureText(label).width;const th=fs+8;
+    const ly=y1-th>=0?y1-th:y1;
+    ax.fillStyle=col;ax.fillRect(x1,ly,tw+14,th);
+    ax.fillStyle="#fff";ax.fillText(label,x1+7,ly+4);
+  }
+  return ac.toDataURL("image/jpeg",0.92);
+}
+
+/* Detect garments in a photo. Returns {items:[{name,category,color,photo}], annotated}. */
+async function detectGarments(dataUrl,onStage){
+  const session=await getDetector(onStage);
+  onStage&&onStage("Finding your pieces…");
+  const img=await loadImage(dataUrl);
+  const W=img.naturalWidth,H=img.naturalHeight;
+
+  const {data,h,w}=preprocessForDetector(img);
+  const input=new _ort.Tensor("float32",data,[1,3,h,w]);
+  const feeds={}; feeds[session.inputNames[0]]=input;
+  const out=await session.run(feeds);
+
+  // logits [1,300,7], pred_boxes [1,300,4] (cxcywh, normalized)
+  let logits=null,boxes=null;
+  for(const n of session.outputNames){const t=out[n]; if(t.dims[2]===4) boxes=t; else logits=t;}
+  const nq=logits.dims[1],nc=logits.dims[2],L=logits.data,B=boxes.data;
+
+  let dets=[];
+  for(let i=0;i<nq;i++){
+    let best=-1,bj=0;
+    for(let j=0;j<nc;j++){const v=sigmoid(L[i*nc+j]); if(v>best){best=v;bj=j;}}
+    if(best<DET_THRESHOLD) continue;
+    const cx=B[i*4],cy=B[i*4+1],bw=B[i*4+2],bh=B[i*4+3];
+    const box=[Math.max(0,(cx-bw/2)*W),Math.max(0,(cy-bh/2)*H),Math.min(W,(cx+bw/2)*W),Math.min(H,(cy+bh/2)*H)];
+    dets.push({score:best,label:DET_LABELS[bj],box});
+  }
+  dets.sort((a,b)=>b.score-a.score);
+  const kept=[];
+  for(const d of dets){ if(kept.every(k=>!((k.label===d.label && iou(k.box,d.box)>0.6) || iou(k.box,d.box)>0.85))) kept.push(d); }
+
+  const sc=document.createElement("canvas");sc.width=W;sc.height=H;
+  const sx=sc.getContext("2d",{willReadFrequently:true});sx.drawImage(img,0,0,W,H);
+  const items=[];
+  for(const d of kept){
+    const map=DET_MAP[d.label]; if(!map) continue;
+    const x1=Math.round(d.box[0]),y1=Math.round(d.box[1]),x2=Math.round(d.box[2]),y2=Math.round(d.box[3]);
+    const bw=Math.max(1,x2-x1),bh=Math.max(1,y2-y1);
+    if(bw*bh < W*H*0.003) continue;
+    const crop=document.createElement("canvas");crop.width=bw;crop.height=bh;
+    crop.getContext("2d").drawImage(sc,x1,y1,bw,bh,0,0,bw,bh);
+    // Sample a tight central patch and take the MEDIAN-ish dominant color
+    // (robust to background bleeding in at the box edges).
+    // Outerwear is often open over a darker layer — sample the side panels (where
+    // the coat fabric is) instead of the center (which shows the layer beneath).
+    let regions;
+    if(map.category==="Outerwear"){
+      regions=[[Math.round(x1+bw*0.06),Math.round(y1+bh*0.25),Math.max(1,Math.round(bw*0.20)),Math.max(1,Math.round(bh*0.50))],
+               [Math.round(x1+bw*0.74),Math.round(y1+bh*0.25),Math.max(1,Math.round(bw*0.20)),Math.max(1,Math.round(bh*0.50))]];
+    } else {
+      regions=[[Math.round(x1+bw*0.35),Math.round(y1+bh*0.35),Math.max(1,Math.round(bw*0.30)),Math.max(1,Math.round(bh*0.30))]];
+    }
+    const dom=sampleDominant(sx, regions);
+    const color=dom?classifyColor(dom[0],dom[1],dom[2]):"Neutral";
+    items.push({name:color+" "+map.noun,category:map.category,subcategory:map.sub||null,color,noun:map.noun,detLabel:d.label,photo:crop.toDataURL("image/jpeg",0.9),bbox:[x1,y1,x2,y2],area:bw*bh});
+  }
+  items.sort((a,b)=>b.area-a.area);
+  await refineLabels(items,onStage);
+  const annotated=items.length?annotatePhoto(img,W,H,items):null;
+  return {items:items.map(({area,bbox,detLabel,noun,...r})=>r),annotated};
+}
+
+async function downscaleDataUrl(dataUrl,max=1000){
+  const img=await loadImage(dataUrl);const scale=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));
+  const w=Math.round(img.naturalWidth*scale),h=Math.round(img.naturalHeight*scale);
+  const c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(img,0,0,w,h);
+  return c.toDataURL("image/jpeg",0.9);
+}
+
+/* ================= REAL OUTFIT ENGINE (from the user's actual closet) ================= */
+/* Pinterest-style reference photos per aesthetic — swap these URLs for your own pins. */
+const AESTHETIC_PHOTOS = {
+  "Minimalist":"https://images.unsplash.com/photo-1485462537746-965f33f7f6a7?auto=format&fit=crop&w=600&q=70",
+  "Clean Girl":"https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=600&q=70",
+  "Korean Style":"https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=600&q=70",
+  "Coquette":"https://images.unsplash.com/photo-1495385794356-15371f348c31?auto=format&fit=crop&w=600&q=70",
+  "Soft Girl":"https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=600&q=70",
+  "Boho":"https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=600&q=70",
+  "Cottagecore":"https://images.unsplash.com/photo-1502716119720-b23a93e5fe1b?auto=format&fit=crop&w=600&q=70",
+  "Y2K":"https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=600&q=70",
+  "Romantic Feminine":"https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&w=600&q=70",
+  "Dark Academia":"https://images.unsplash.com/photo-1507680434567-5739c80be1ac?auto=format&fit=crop&w=600&q=70",
+  "Streetwear":"https://images.unsplash.com/photo-1520975954732-35dd22299614?auto=format&fit=crop&w=600&q=70",
+  "Angelcore":"https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&w=600&q=70",
+  "Baddie":"https://images.unsplash.com/photo-1520975954732-35dd22299614?auto=format&fit=crop&w=600&q=70",
+  "Hipster":"https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=600&q=70",
+  "Indie":"https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=600&q=70",
+  "Kawaii":"https://images.unsplash.com/photo-1495385794356-15371f348c31?auto=format&fit=crop&w=600&q=70",
+  _default:"https://images.unsplash.com/photo-1485462537746-965f33f7f6a7?auto=format&fit=crop&w=600&q=70",
+};
+
+const OUTFIT_TITLES = ["Soft Daylight","Easy Lines","Golden Hour","Off-Duty Cool","Quiet Luxe","Sunday Slow","Pretty Casual","Fresh & Clean"];
+
+/* Pinterest-style model photos by base style. Swap these URLs for your own pins. */
+const CALI_PHOTOS = [
+  "https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=600&q=70",
+  "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=600&q=70",
+  "https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=600&q=70",
+  "https://images.unsplash.com/photo-1485462537746-965f33f7f6a7?auto=format&fit=crop&w=600&q=70",
+  "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=600&q=70",
+];
+const KOREAN_PHOTOS = [
+  "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&w=600&q=70",
+  "https://images.unsplash.com/photo-1495385794356-15371f348c31?auto=format&fit=crop&w=600&q=70",
+  "https://images.unsplash.com/photo-1507680434567-5739c80be1ac?auto=format&fit=crop&w=600&q=70",
+  "https://images.unsplash.com/photo-1520975954732-35dd22299614?auto=format&fit=crop&w=600&q=70",
+  "https://images.unsplash.com/photo-1502716119720-b23a93e5fe1b?auto=format&fit=crop&w=600&q=70",
+];
+
+function makeNote(items, baseStyle){
+  const top=items.find(i=>i.category==="Tops"),bottom=items.find(i=>i.category==="Bottoms"),
+        shoe=items.find(i=>i.category==="Shoes"),outer=items.find(i=>i.category==="Outerwear"),
+        extra=items.find(i=>i.category==="Accessories");
+  const parts=[];
+  if(top&&bottom)parts.push(`your ${top.name.toLowerCase()} half-tucked into the ${bottom.name.toLowerCase()} keeps the line relaxed but intentional`);
+  else if(top)parts.push(`let the ${top.name.toLowerCase()} be the whole moment and keep everything around it quiet`);
+  else if(bottom)parts.push(`build the look around the ${bottom.name.toLowerCase()} with a fitted layer up top`);
+  if(outer)parts.push(`throw the ${outer.name.toLowerCase()} on open with the sleeves pushed up`);
+  if(shoe)parts.push(`the ${shoe.name.toLowerCase()} ground it with an easy, off-duty edge`);
+  if(extra)parts.push(`finish with the ${extra.name.toLowerCase()} so it feels put-together, never fussy`);
+  const flavor = baseStyle==="Korean"
+    ? " Lean into clean, trend-forward Korean-street lines."
+    : baseStyle==="Cali" ? " Keep it sun-washed and California-easy." : "";
+  const s=parts.join(", ");
+  return (s ? s.charAt(0).toUpperCase()+s.slice(1)+"." : "An effortless, pulled-together look from your closet.") + flavor;
+}
+
+/* Compose up to 5 coherent outfits from real closet items.
+   opts.tryNew: include 1-2 "try something new" looks; off = all on preferred vibe.
+   opts.baseStyle: "Cali" | "Korean" — picks the model photo set + note flavor. */
+function buildOutfits(closet, likedAesthetics, favorites, opts){
+  opts = opts || {};
+  const byCat=c=>closet.filter(i=>i.category===c);
+  const tops=byCat("Tops"),bottoms=byCat("Bottoms"),shoes=byCat("Shoes"),
+        outer=byCat("Outerwear"),acc=byCat("Accessories");
+  if(closet.length<2||(tops.length===0&&bottoms.length===0))return [];
+  const favItemIds=new Set((favorites||[]).flatMap(f=>(f.items||[]).map(it=>it.id)));
+  const rank=arr=>[...arr].sort((a,b)=>((favItemIds.has(b.id)?1:0)-(favItemIds.has(a.id)?1:0))||((b.fav?1:0)-(a.fav?1:0)));
+  const T=rank(tops),B=rank(bottoms);
+
+  // Aesthetic plan for the 5 looks.
+  const likedArr=[...likedAesthetics];
+  const preferred=likedArr.length?likedArr:["Minimalist","Clean Girl","Streetwear"];
+  const others=AESTHETICS.filter(a=>!likedAesthetics.has(a));
+  const plan=[];
+  for(let i=0;i<5;i++){
+    if(opts.tryNew && i>=3 && others.length){ plan.push({a:others[(i-3)%others.length],familiar:false}); }
+    else { plan.push({a:preferred[i%preferred.length],familiar:true}); }
+  }
+  const basePhotos = opts.baseStyle==="Korean" ? KOREAN_PHOTOS : CALI_PHOTOS;
+
+  const outfits=[],used=new Set();
+  const at=arr=>arr.length?arr:[null];
+  const push=set=>{
+    const items=set.filter(Boolean);
+    if(items.length<2||outfits.length>=5)return;
+    const key=items.map(i=>i.id).sort().join("-");if(used.has(key))return;used.add(key);
+    const pe=plan[outfits.length];
+    outfits.push({
+      id:"gen_"+key,
+      title:OUTFIT_TITLES[outfits.length%OUTFIT_TITLES.length],
+      aesthetic:(opts.baseStyle?opts.baseStyle+" · ":"")+pe.a,
+      img:basePhotos[outfits.length%basePhotos.length],
+      note:makeNote(items,opts.baseStyle),
+      items:items.map(i=>({id:i.id,name:i.name,category:i.category,photo:i.photo})),
+      familiar:pe.familiar,
+    });
+  };
+  for(let ti=0;ti<at(T).length&&outfits.length<5;ti++){
+    for(let bi=0;bi<at(B).length&&outfits.length<5;bi++){
+      const k=ti+bi;
+      const set=[T[ti],B[bi],
+        shoes.length?shoes[k%shoes.length]:null,
+        outer.length?outer[k%outer.length]:null,
+        acc.length?acc[k%acc.length]:null,
+        acc.length>1?acc[(k+1)%acc.length]:null];
+      push(set);
+    }
+  }
+  for(let ti=0;ti<T.length&&outfits.length<5;ti++){
+    push([T[ti],shoes[0]||null,acc[0]||null,acc[1]||null,outer[0]||null]);
+  }
+  return outfits.slice(0,5);
+}
+
+/* ---------- Outfit Engine (legacy demo templates, unused) ---------- */
+/* Real outfit photos (Unsplash, hotlink-friendly). Each falls back to a stylized figure if blocked. */
+const OUTFIT_TEMPLATES = [
+  { id: "o1", title: "Simple White & Black", aesthetic: "Minimalist",
+    img: "https://images.unsplash.com/photo-1485462537746-965f33f7f6a7?auto=format&fit=crop&w=600&q=70",
+    items: [
+      { name: "White Ribbed Tank", category: "Tops" },
+      { name: "Black Tailored Trousers", category: "Bottoms" },
+      { name: "Mary Jane Flats", category: "Shoes" },
+    ],
+    note: "A crisp white tank tucked into tailored black trousers keeps the line clean and intentional. The monochrome contrast does all the work, so you look polished without trying too hard." },
+  { id: "o2", title: "Denim with Tank", aesthetic: "Clean Girl",
+    img: "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=600&q=70",
+    items: [
+      { name: "White Ribbed Tank", category: "Tops" },
+      { name: "High-Waist Mom Jeans", category: "Bottoms" },
+      { name: "Oversized Denim Jacket", category: "Outerwear" },
+      { name: "White Canvas Sneakers", category: "Shoes" },
+    ],
+    note: "High-waist mom jeans balance a fitted ribbed tank for that effortless off-duty silhouette. Add the denim jacket on top and you've got an easy double-denim moment that reads cool, not costume." },
+  { id: "o3", title: "Skirt & Cropped Shirt", aesthetic: "Coquette",
+    img: "https://images.unsplash.com/photo-1495385794356-15371f348c31?auto=format&fit=crop&w=600&q=70",
+    items: [
+      { name: "Black Cropped Tee", category: "Tops" },
+      { name: "Pleated Mini Skirt", category: "Bottoms" },
+      { name: "Mary Jane Flats", category: "Shoes" },
+      { name: "Mini Shoulder Bag", category: "Bags" },
+    ],
+    note: "A pleated mini skirt with a cropped tee shows just a sliver of waist for a flirty, balanced proportion. Mary Janes finish it with a sweet, put-together edge perfect for golden-hour photos." },
+  { id: "o4", title: "Soft Layered Knit", aesthetic: "Soft Girl",
+    img: "https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=600&q=70",
+    items: [
+      { name: "Pink Knit Cardigan", category: "Tops" },
+      { name: "White Ribbed Tank", category: "Tops" },
+      { name: "High-Waist Mom Jeans", category: "Bottoms" },
+      { name: "Chunky Loafers", category: "Shoes" },
+    ],
+    note: "The pink cardigan over a white tank wraps you in cozy texture while staying breathable for mild weather. Loafers ground the softness so the whole look feels grown-up and intentional." },
+  { id: "o5", title: "Breezy & Bright", aesthetic: "Boho",
+    img: "https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=600&q=70",
+    items: [
+      { name: "Sage Button Blouse", category: "Tops" },
+      { name: "Lavender Linen Shorts", category: "Bottoms" },
+      { name: "Wide-Brim Sun Hat", category: "Hats" },
+      { name: "Quilted Crossbody Bag", category: "Bags" },
+    ],
+    note: "Linen shorts and a button blouse move with the breeze and stay airy in the sun. A wide-brim hat and crossbody bag make it feel curated for a slow, sunny day out." },
+  { id: "o6", title: "Prairie Midi Dress", aesthetic: "Cottagecore",
+    img: "https://images.unsplash.com/photo-1502716119720-b23a93e5fe1b?auto=format&fit=crop&w=600&q=70",
+    items: [
+      { name: "Floral Midi Dress", category: "Tops" },
+      { name: "Knit Shrug", category: "Outerwear" },
+      { name: "Leather Mary Janes", category: "Shoes" },
+      { name: "Woven Basket Bag", category: "Bags" },
+    ],
+    note: "A floral midi dress with a soft knit shrug feels gentle and storybook without trying. The basket bag and Mary Janes lean into that easy, garden-walk charm." },
+  { id: "o7", title: "Low-Rise & Baby Tee", aesthetic: "Y2K",
+    img: "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=600&q=70",
+    items: [
+      { name: "Baby Tee", category: "Tops" },
+      { name: "Low-Rise Flare Jeans", category: "Bottoms" },
+      { name: "Platform Sneakers", category: "Shoes" },
+      { name: "Tinted Sunglasses", category: "Accessories" },
+    ],
+    note: "A fitted baby tee with low-rise flares nails that early-2000s throwback line. Platform sneakers and tinted shades push it fully into playful Y2K territory." },
+  { id: "o8", title: "Lace & Ribbon", aesthetic: "Romantic Feminine",
+    img: "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&w=600&q=70",
+    items: [
+      { name: "Lace Trim Blouse", category: "Tops" },
+      { name: "Satin Midi Skirt", category: "Bottoms" },
+      { name: "Ballet Flats", category: "Shoes" },
+      { name: "Silk Hair Ribbon", category: "Accessories" },
+    ],
+    note: "A lace-trim blouse over a satin midi skirt drapes softly for a tender, romantic feel. A silk hair ribbon and ballet flats keep the whole look delicate and pretty." },
+  { id: "o9", title: "Tailored Academia", aesthetic: "Dark Academia",
+    img: "https://images.unsplash.com/photo-1507680434567-5739c80be1ac?auto=format&fit=crop&w=600&q=70",
+    items: [
+      { name: "Wool Blazer", category: "Outerwear" },
+      { name: "Knit Vest", category: "Tops" },
+      { name: "Pleated Trousers", category: "Bottoms" },
+      { name: "Leather Loafers", category: "Shoes" },
+    ],
+    note: "A wool blazer over a knit vest layers up that scholarly, library-hours mood. Pleated trousers and leather loafers keep the palette rich and grounded." },
+  { id: "o10", title: "Street Layers", aesthetic: "Streetwear",
+    img: "https://images.unsplash.com/photo-1520975954732-35dd22299614?auto=format&fit=crop&w=600&q=70",
+    items: [
+      { name: "Oversized Hoodie", category: "Tops" },
+      { name: "Cargo Pants", category: "Bottoms" },
+      { name: "Chunky Sneakers", category: "Shoes" },
+      { name: "Crossbody Sling", category: "Bags" },
+    ],
+    note: "An oversized hoodie with cargo pants keeps the proportions relaxed and easy to move in. Chunky sneakers and a sling bag finish the off-duty street look." },
+];
+
+/* ================= COMPONENTS ================= */
+
+function WeatherBar() {
+  return (
+    <div className="rounded-3xl px-6 py-5"
+      style={{ background: "linear-gradient(125deg,#E6F0FB,#F1ECFB 55%,#FDE9F1)" }}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-14 h-14 rounded-3xl flex items-center justify-center" style={{ background: "#FFF3D1" }}>
+            <Sun size={30} color="#E5A93B" />
+          </div>
+          <div>
+            <div className="text-[22px] leading-none font-black" style={{ color: "#5D87A8" }}>68°F</div>
+            <div className="text-[13px] font-bold flex items-center gap-1 mt-1" style={{ color: "#8AA6BD" }}>
+              <Wind size={13} /> Sunny & soft breeze
+            </div>
+          </div>
+        </div>
+        <Cloud size={48} color="#BBD6EC" />
+      </div>
+      <div className="flex items-center gap-2 mt-4">
+        <div className="flex-1 rounded-2xl px-3 py-2 text-center" style={{ background: "#ffffff80" }}>
+          <div className="text-[11px] font-bold" style={{ color: "#A9B8C8" }}>HIGH</div>
+          <div className="text-[15px] font-black" style={{ color: "#5D87A8" }}>72°</div>
+        </div>
+        <div className="flex-1 rounded-2xl px-3 py-2 text-center" style={{ background: "#ffffff80" }}>
+          <div className="text-[11px] font-bold" style={{ color: "#A9B8C8" }}>LOW</div>
+          <div className="text-[15px] font-black" style={{ color: "#5D87A8" }}>61°</div>
+        </div>
+        <div className="flex-1 rounded-2xl px-3 py-2 text-center" style={{ background: "#ffffff80" }}>
+          <div className="text-[11px] font-bold" style={{ color: "#A9B8C8" }}>FEELS</div>
+          <div className="text-[15px] font-black" style={{ color: "#5D87A8" }}>70°</div>
+        </div>
+      </div>
+      <div className="text-[12px] font-bold mt-3 flex items-center gap-1.5" style={{ color: "#9D9BC0" }}>
+        <Sparkles size={12} /> Light layers weather — perfect for a cardigan moment.
+      </div>
+    </div>
+  );
+}
+
+function PersonGraphic({ pastel, img }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="w-full rounded-3xl overflow-hidden relative" style={{ height: 260, background: pastel.ring + "55" }}>
+      {img && !failed ? (
+        <img src={img} alt="outfit on model" loading="lazy" onError={() => setFailed(true)}
+          className="absolute inset-0 w-full h-full object-cover" />
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <svg width="90" height="130" viewBox="0 0 90 130">
+            <circle cx="45" cy="22" r="16" fill={pastel.text} opacity="0.85" />
+            <rect x="28" y="40" width="34" height="42" rx="14" fill={pastel.text} opacity="0.6" />
+            <rect x="30" y="78" width="13" height="40" rx="6" fill={pastel.text} opacity="0.45" />
+            <rect x="47" y="78" width="13" height="40" rx="6" fill={pastel.text} opacity="0.45" />
+          </svg>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* The outfit "photo" = a moodboard of the user's REAL items, so the image always
+   matches the pieces in the look. */
+function OutfitCollage({ items, pastel }) {
+  const list = (items || []).slice(0, 5);
+  const big = list.length <= 2;
+  return (
+    <div className="w-full rounded-3xl overflow-hidden relative flex flex-wrap items-center justify-center gap-2 p-3"
+      style={{ height: 260, background: pastel.ring + "55" }}>
+      {list.map((it, i) => (
+        <div key={i} className="rounded-2xl overflow-hidden bg-white shadow-sm flex items-center justify-center"
+          style={{ width: big ? "46%" : "30.5%", height: big ? "88%" : "46%" }}>
+          {it.photo ? <img src={it.photo} alt={it.name} className="w-full h-full object-cover" />
+                    : <CatIcon category={it.category} size={28} color={pastel.text} />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StylistTab({ closet, favorites, toggleFav, prefs }) {
+  const [occasion, setOccasion] = useState("");
+  const [custom, setCustom] = useState("");
+  const [outfits, setOutfits] = useState([]);
+  const [open, setOpen] = useState({});
+  const [generating, setGenerating] = useState(false);
+  const [tried, setTried] = useState(false);
+
+  const favIds = new Set(favorites.map((f) => f.id));
+
+  const generate = () => {
+    setGenerating(true);
+    setTried(true);
+    setOutfits([]);
+    setTimeout(() => {
+      // Looks the user leans toward: favorited outfits' aesthetics + profile picks.
+      const favAesthetics = favorites.map((f) => f.aesthetic);
+      const likedAesthetics = new Set([...favAesthetics, ...(prefs?.aesthetics || [])]);
+      // Build real outfits from the actual closet items.
+      const built = buildOutfits(closet, likedAesthetics, favorites, { tryNew: !!prefs?.tryNew, baseStyle: prefs?.baseStyle });
+      const picked = built.map((o, i) => ({ ...o, pastel: PASTELS[i % PASTELS.length] }));
+      setOutfits(picked);
+      setGenerating(false);
+    }, 600);
+  };
+
+  return (
+    <div className="pb-40">
+      <WeatherBar />
+
+      <h1 className="text-[34px] leading-tight font-black mt-10 mb-6" style={{ color: "#5A5167" }}>Outfit ideas, just a click away</h1>
+
+      {/* Occasion */}
+      <label className="text-xs font-bold uppercase tracking-wide" style={{ color: "#A99FB5" }}>Occasion</label>
+      <div className="relative mt-2 mb-3">
+        <select value={occasion} onChange={(e) => setOccasion(e.target.value)}
+          className="w-full appearance-none rounded-2xl px-4 py-4 text-[15px] font-bold outline-none"
+          style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#6E6480" }}>
+          <option value="">Pick an occasion…</option>
+          {OCCASIONS.map((o) => <option key={o}>{o}</option>)}
+        </select>
+        <ChevronDown size={18} className="absolute right-4 top-4 pointer-events-none" color="#C6BCD2" />
+      </div>
+      <input value={custom} onChange={(e) => setCustom(e.target.value)}
+        placeholder="…or type your own occasion"
+        className="w-full rounded-2xl px-4 py-3.5 text-[14px] font-semibold outline-none mb-6"
+        style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#6E6480" }} />
+
+      {/* Not enough pieces after a generate attempt */}
+      {tried && !generating && outfits.length === 0 && (
+        <div className="rounded-3xl p-6 text-center" style={{ background: "#FCEDE6" }}>
+          <div className="w-16 h-16 rounded-3xl mx-auto flex items-center justify-center mb-3" style={{ background: "#ffffffcc" }}>
+            <CameraIcon size={28} color="#CC8567" />
+          </div>
+          <div className="text-[15px] font-black mb-1" style={{ color: "#5A5167" }}>Not enough pieces yet</div>
+          <p className="text-[13px] font-semibold" style={{ color: "#A99FB5" }}>
+            Add at least a top and a bottom in the Camera tab, then generate again.
+          </p>
+        </div>
+      )}
+
+      {/* Empty state — fills space before generating */}
+      {outfits.length === 0 && !generating && !tried && (
+        <div className="rounded-3xl p-7 text-center" style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
+          <div className="w-20 h-20 rounded-3xl mx-auto flex items-center justify-center mb-4" style={{ background: "#ffffffcc" }}>
+            <Sparkles size={38} color="#C56B96" />
+          </div>
+          <div className="text-[18px] font-black mb-1" style={{ color: "#5A5167" }}>Ready when you are</div>
+          <p className="text-[13.5px] font-semibold leading-relaxed mb-5" style={{ color: "#A99FB5" }}>
+            Pick an occasion above, then tap Generate Outfits to get five looks styled from your closet.
+          </p>
+          <div className="grid grid-cols-3 gap-2.5">
+            {[
+              { label: "Curated", icon: Shirt },
+              { label: "Weather-aware", icon: Cloud },
+              { label: "Your vibe", icon: Heart },
+            ].map((f, i) => {
+              const p = PASTELS[i % PASTELS.length];
+              const Icon = f.icon;
+              return (
+                <div key={f.label} className="rounded-2xl py-4 flex flex-col items-center gap-2" style={{ background: "#ffffffaa" }}>
+                  <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: p.bg }}>
+                    <Icon size={20} color={p.text} />
+                  </div>
+                  <span className="text-[11px] font-extrabold" style={{ color: "#6E6480" }}>{f.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Results */}
+      {outfits.length > 0 && (
+        <div className="mt-6 space-y-4">
+          <h2 className="text-lg font-black" style={{ color: "#5A5167" }}>Your {outfits.length} look{outfits.length !== 1 ? "s" : ""}</h2>
+          {outfits.map((o, i) => (
+            <div key={i} className="rounded-3xl p-4" style={{ background: o.pastel.bg }}>
+              <OutfitCollage items={o.items} pastel={o.pastel} />
+              <div className="flex items-center justify-between mt-3 gap-2">
+                <h3 className="text-[17px] font-black" style={{ color: o.pastel.text }}>{o.title}</h3>
+                <button onClick={() => toggleFav(o)}
+                  className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0"
+                  style={{ background: favIds.has(o.id) ? o.pastel.ring : "#ffffffcc" }}>
+                  <Heart size={18} color={o.pastel.text} fill={favIds.has(o.id) ? o.pastel.text : "none"} />
+                </button>
+              </div>
+              <div className="mt-1.5">
+                <span className="inline-flex items-center gap-1 text-[11px] font-extrabold px-2.5 py-1 rounded-full" style={{ background: "#ffffffaa", color: o.pastel.text }}>
+                  {o.familiar ? <><Heart size={11} /> For your vibe · {o.aesthetic}</> : <><Sparkles size={11} /> Try something new · {o.aesthetic}</>}
+                </span>
+              </div>
+
+              {/* item list */}
+              <div className="mt-3 space-y-1.5">
+                {o.items.map((it, k) => (
+                  <div key={k} className="flex items-center gap-2.5 px-3 py-2 rounded-2xl" style={{ background: "#ffffff99" }}>
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 overflow-hidden" style={{ background: o.pastel.ring }}>
+                      {it.photo
+                        ? <img src={it.photo} alt="" className="w-full h-full object-cover" />
+                        : <CatIcon category={it.category} size={15} color={o.pastel.text} />}
+                    </div>
+                    <span className="text-[13px] font-extrabold" style={{ color: "#5A5167" }}>{it.name}</span>
+                    <span className="ml-auto text-[11px] font-bold" style={{ color: o.pastel.text }}>{it.category}</span>
+                  </div>
+                ))}
+              </div>
+
+              <button onClick={() => setOpen((s) => ({ ...s, [i]: !s[i] }))}
+                className="mt-2 w-full flex items-center justify-between px-4 py-2.5 rounded-2xl text-[13px] font-extrabold"
+                style={{ background: "#ffffffaa", color: o.pastel.text }}>
+                Stylist Note
+                <ChevronDown size={16} style={{ transform: open[i] ? "rotate(180deg)" : "none", transition: "transform .25s" }} />
+              </button>
+              <div style={{ maxHeight: open[i] ? 200 : 0, overflow: "hidden", transition: "max-height .35s ease" }}>
+                <p className="text-[13px] font-semibold leading-relaxed px-1 pt-3" style={{ color: o.pastel.text }}>
+                  {o.note}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* FAB */}
+      <div className="fixed left-0 right-0 flex justify-center pointer-events-none" style={{ bottom: 92, maxWidth: 430, margin: "0 auto" }}>
+        <button onClick={generate} disabled={generating}
+          className="pointer-events-auto flex items-center gap-2 px-7 py-4 rounded-full font-black text-white text-[16px] active:scale-95 transition-transform"
+          style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)", boxShadow: "0 12px 30px -6px #F3B6D0aa, 0 4px 10px #00000015" }}>
+          {generating ? <Loader2 size={22} className="animate-spin" /> : <Sparkles size={22} />}
+          {generating ? "Styling…" : "Generate Outfits"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
+  const [activeCat, setActiveCat] = useState(null);
+  const [activeSub, setActiveSub] = useState(null);
+  const [inTrash, setInTrash] = useState(false);
+  const [query, setQuery] = useState("");
+  const [swiped, setSwiped] = useState(null);
+
+  const counts = CATEGORIES.reduce((a, c) => {
+    a[c.key] = closet.filter((i) => i.category === c.key).length; return a;
+  }, {});
+  const subCounts = ACCESSORY_SUBCATS.reduce((a, s) => {
+    a[s.key] = closet.filter((i) => i.category === "Accessories" && i.subcategory === s.key).length; return a;
+  }, {});
+
+  const toggleFav = (id) => setCloset((c) => c.map((i) => i.id === id ? { ...i, fav: !i.fav } : i));
+  const toggleWash = (id) => setCloset((c) => c.map((i) => i.id === id ? { ...i, wash: !i.wash } : i));
+  const toTrash = (id) => {
+    const item = closet.find((i) => i.id === id);
+    setCloset((c) => c.filter((i) => i.id !== id));
+    setTrash((t) => [item, ...t]);
+    setSwiped(null);
+  };
+  const recover = (id) => {
+    const item = trash.find((i) => i.id === id);
+    setTrash((t) => t.filter((i) => i.id !== id));
+    setCloset((c) => [{ ...item, fav: false, wash: false }, ...c]);
+  };
+  const purge = (id) => setTrash((t) => t.filter((i) => i.id !== id));
+
+  /* search across everything */
+  const searching = query.trim().length > 0;
+  const results = closet.filter((i) =>
+    i.name.toLowerCase().includes(query.toLowerCase()) ||
+    i.category.toLowerCase().includes(query.toLowerCase()) ||
+    i.color.toLowerCase().includes(query.toLowerCase()));
+
+  const Thumb = ({ item, size = 52 }) => {
+    const p = PASTELS[item.name.length % 5];
+    return (
+      <div className="rounded-2xl flex items-center justify-center shrink-0 overflow-hidden"
+        style={{ width: size, height: size, background: p.bg }}>
+        {item.photo
+          ? <img src={item.photo} alt="" className="w-full h-full object-cover" />
+          : <CatIcon category={item.category} size={size * 0.42} color={p.text} />}
+      </div>
+    );
+  };
+
+  const ItemRow = ({ item }) => (
+    <div className="relative overflow-hidden rounded-2xl">
+      {/* trash reveal */}
+      <div className="absolute right-0 top-0 bottom-0 flex items-center pr-4"
+        style={{ background: "#FAD4D4", width: 80 }}>
+        <button onClick={() => toTrash(item.id)} className="text-white">
+          <Trash2 size={22} color="#D96A6A" />
+        </button>
+      </div>
+      <div className="flex items-center gap-3 p-3 transition-transform"
+        style={{ background: "#fff", transform: swiped === item.id ? "translateX(-80px)" : "translateX(0)", border: "1.5px solid #F1E6F1" }}
+        onClick={() => setSwiped(swiped === item.id ? null : item.id)}>
+        <Thumb item={item} />
+        <div className="flex-1 min-w-0">
+          <div className="text-[15px] font-extrabold truncate" style={{ color: "#5A5167" }}>{item.name}</div>
+          <div className="text-[12px] font-semibold" style={{ color: "#A99FB5" }}>{item.color}</div>
+        </div>
+        <button onClick={(e) => { e.stopPropagation(); toggleWash(item.id); }}
+          className="w-9 h-9 rounded-xl flex items-center justify-center"
+          style={{ background: item.wash ? "#E6F2FB" : "#F4EEF5" }}>
+          <WashingMachine size={17} color={item.wash ? "#5D87A8" : "#C6BCD2"} />
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); toggleFav(item.id); }}
+          className="w-9 h-9 rounded-xl flex items-center justify-center"
+          style={{ background: item.fav ? "#FDE9F1" : "#F4EEF5" }}>
+          <Heart size={17} color={item.fav ? "#E891B5" : "#C6BCD2"} fill={item.fav ? "#E891B5" : "none"} />
+        </button>
+      </div>
+    </div>
+  );
+
+  /* ---- Trash view ---- */
+  if (inTrash) {
+    return (
+      <div className="pb-28">
+        <button onClick={() => setInTrash(false)} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-4" style={{ color: "#A99FB5" }}>
+          <ArrowLeft size={18} /> Closet
+        </button>
+        <h1 className="text-2xl font-black mb-1" style={{ color: "#5A5167" }}>Trash</h1>
+        <p className="text-sm font-semibold mb-5" style={{ color: "#A99FB5" }}>Recover anything you're not ready to let go of.</p>
+        {trash.length === 0 ? (
+          <div className="text-center py-16 text-[14px] font-bold" style={{ color: "#C6BCD2" }}>Trash is empty — squeaky clean</div>
+        ) : (
+          <div className="space-y-3">
+            {trash.map((item) => (
+              <div key={item.id} className="flex items-center gap-3 p-3 rounded-2xl" style={{ background: "#fff", border: "1.5px solid #F1E6F1" }}>
+                <Thumb item={item} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[15px] font-extrabold truncate" style={{ color: "#5A5167" }}>{item.name}</div>
+                  <div className="text-[12px] font-semibold" style={{ color: "#A99FB5" }}>{item.category} · {item.color}</div>
+                </div>
+                <button onClick={() => recover(item.id)} className="px-3 py-2 rounded-xl text-[12px] font-extrabold flex items-center gap-1" style={{ background: "#E8F6EC", color: "#6BA37C" }}>
+                  <RotateCcw size={14} /> Recover
+                </button>
+                <button onClick={() => purge(item.id)} className="px-3 py-2 rounded-xl text-[12px] font-extrabold" style={{ background: "#FAD4D4", color: "#D96A6A" }}>
+                  Delete
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* ---- Accessories sub-category grid ---- */
+  if (activeCat === "Accessories" && !activeSub) {
+    return (
+      <div className="pb-28">
+        <button onClick={() => { setActiveCat(null); setSwiped(null); }} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-4" style={{ color: "#A99FB5" }}>
+          <ArrowLeft size={18} /> Categories
+        </button>
+        <h1 className="text-2xl font-black mb-1" style={{ color: "#5A5167" }}>Accessories</h1>
+        <p className="text-sm font-semibold mb-4" style={{ color: "#A99FB5" }}>{counts["Accessories"]} pieces</p>
+        <div className="grid grid-cols-2 gap-3">
+          {ACCESSORY_SUBCATS.map((s, i) => {
+            const Icon = s.icon; const p = PASTELS[i % PASTELS.length];
+            return (
+              <button key={s.key} onClick={() => setActiveSub(s.key)}
+                className="rounded-3xl p-4 text-left active:scale-95 transition-transform"
+                style={{ background: p.bg, minHeight: 104 }}>
+                <div className="w-10 h-10 rounded-2xl flex items-center justify-center mb-2" style={{ background: "#ffffffcc" }}>
+                  <Icon size={20} color={p.text} />
+                </div>
+                <div className="text-[14px] font-black leading-tight" style={{ color: p.text }}>{s.key}</div>
+                <div className="text-[12px] font-bold" style={{ color: p.text + "bb" }}>{subCounts[s.key]} pieces</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  /* ---- Item list (category or accessory sub-category) ---- */
+  if (activeCat) {
+    const items = activeSub
+      ? closet.filter((i) => i.category === "Accessories" && i.subcategory === activeSub)
+      : closet.filter((i) => i.category === activeCat);
+    const title = activeSub || activeCat;
+    const goBack = activeSub ? () => { setActiveSub(null); setSwiped(null); } : () => { setActiveCat(null); setSwiped(null); };
+    return (
+      <div className="pb-28">
+        <button onClick={goBack} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-4" style={{ color: "#A99FB5" }}>
+          <ArrowLeft size={18} /> {activeSub ? "Accessories" : "Categories"}
+        </button>
+        <h1 className="text-2xl font-black mb-1" style={{ color: "#5A5167" }}>{title}</h1>
+        <p className="text-sm font-semibold mb-2" style={{ color: "#A99FB5" }}>{items.length} pieces · tap a card to reveal trash</p>
+        <div className="space-y-3 mt-4">
+          {items.length === 0 ? (
+            <div className="rounded-3xl p-8 text-center" style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
+              <div className="w-14 h-14 rounded-3xl mx-auto flex items-center justify-center mb-3" style={{ background: "#ffffffcc" }}>
+                <CameraIcon size={26} color="#C56B96" />
+              </div>
+              <div className="text-[15px] font-black" style={{ color: "#5A5167" }}>No {title.toLowerCase()} yet</div>
+              <p className="text-[13px] font-semibold mt-1" style={{ color: "#A99FB5" }}>Snap a piece below to add it here.</p>
+            </div>
+          ) : (
+            items.map((item) => <ItemRow key={item.id} item={item} />)
+          )}
+        </div>
+        <button onClick={goCamera}
+          className="mt-5 w-full flex items-center justify-center gap-2 py-4 rounded-2xl text-[15px] font-black border-2 border-dashed"
+          style={{ borderColor: "#E4D5E6", color: "#A99FB5", background: "#FAF3FA" }}>
+          <Plus size={20} /> Add Item…
+        </button>
+      </div>
+    );
+  }
+
+  /* ---- Category grid (home) ---- */
+  return (
+    <div className="pb-28">
+      <h1 className="text-[34px] leading-tight font-black mb-4" style={{ color: "#5A5167" }}>My Closet</h1>
+      <div className="relative mb-5">
+        <Search size={18} className="absolute left-4 top-3.5" color="#C6BCD2" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search my wardrobe…"
+          className="w-full rounded-full pl-11 pr-4 py-3 text-[14px] font-semibold outline-none"
+          style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#6E6480" }} />
+      </div>
+
+      {searching ? (
+        <div className="space-y-3">
+          <p className="text-[13px] font-bold" style={{ color: "#A99FB5" }}>{results.length} match{results.length !== 1 ? "es" : ""}</p>
+          {results.map((item) => <ItemRow key={item.id} item={item} />)}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          {CATEGORIES.map((c, i) => {
+            const Icon = c.icon;
+            const p = PASTELS[i % PASTELS.length];
+            return (
+              <button key={c.key} onClick={() => setActiveCat(c.key)}
+                className="rounded-3xl p-4 text-left active:scale-95 transition-transform"
+                style={{ background: p.bg, minHeight: 110 }}>
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-2" style={{ background: "#ffffffcc" }}>
+                  <Icon size={22} color={p.text} />
+                </div>
+                <div className="text-[15px] font-black" style={{ color: p.text }}>{c.key}</div>
+                <div className="text-[12px] font-bold" style={{ color: p.text + "bb" }}>{counts[c.key]} pieces</div>
+              </button>
+            );
+          })}
+          {/* Trash tile */}
+          <button onClick={() => setInTrash(true)}
+            className="rounded-3xl p-4 text-left active:scale-95 transition-transform"
+            style={{ background: "#F6EEF6", minHeight: 110 }}>
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-2" style={{ background: "#ffffffcc" }}>
+              <Trash2 size={22} color="#A99FB5" />
+            </div>
+            <div className="text-[15px] font-black" style={{ color: "#8A7FA0" }}>Trash</div>
+            <div className="text-[12px] font-bold" style={{ color: "#A99FB5" }}>{trash.length} items</div>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Reusable camera hook ---------- */
+function useCamera(active = true) {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const [camState, setCamState] = useState("starting"); // starting | live | denied | unavailable
+
+  const stopStream = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+  };
+
+  const startCamera = async () => {
+    setCamState("starting");
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCamState("unavailable");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+      }
+      setCamState("live");
+    } catch (err) {
+      setCamState(err && err.name === "NotAllowedError" ? "denied" : "unavailable");
+    }
+  };
+
+  useEffect(() => {
+    if (active) startCamera(); else stopStream();
+    return stopStream;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+
+  // Re-wire the <video> to the stream if it remounts into view
+  useEffect(() => {
+    if (camState === "live" && videoRef.current && streamRef.current && !videoRef.current.srcObject) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  });
+
+  // Capture current frame cropped to 3:4, returns a jpeg data URL (or null)
+  const capture = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (camState === "live" && video && canvas && video.videoWidth) {
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const targetRatio = 3 / 4;
+      let sw = vw, sh = vw / targetRatio;
+      if (sh > vh) { sh = vh; sw = vh * targetRatio; }
+      const sx = (vw - sw) / 2, sy = (vh - sh) / 2;
+      canvas.width = 600; canvas.height = 800;
+      canvas.getContext("2d").drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", 0.85);
+    }
+    return null;
+  };
+
+  return { videoRef, canvasRef, camState, startCamera, capture, stopStream };
+}
+
+function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial }) {
+  const { videoRef, canvasRef, camState, startCamera, capture } = useCamera(active);
+  const fileRef = useRef(null);
+  const [scanning, setScanning] = useState(false);
+  const [stage, setStage] = useState("");
+  const [photo, setPhoto] = useState(null);   // displayed data URL
+  const [results, setResults] = useState(null); // [{name, category, subcategory, color, photo}]
+  const [error, setError] = useState(null);
+  const [picker, setPicker] = useState(null); // index of the item whose category picker is open
+  const [loadPct, setLoadPct] = useState(0);
+  useEffect(() => onModelProgress(setLoadPct), []);
+
+  const setItemCategory = (i, category, subcategory) =>
+    setResults((rs) => rs.map((r, j) => j === i
+      ? { ...r, category, subcategory: category === "Accessories" ? (subcategory || r.subcategory || "Jewelry") : null }
+      : r));
+
+  // Add the current photo as an item the detector didn't find (jewelry, hairclips, …).
+  const addManual = () => {
+    const idx = (results || []).length;
+    setResults((rs) => [...(rs || []), { name: "New Item", category: "Accessories", subcategory: "Jewelry", color: "Neutral", photo }]);
+    setError(null);
+    setPicker(idx);
+  };
+
+  const removeItem = (i) => setResults((rs) => { const next = (rs || []).filter((_, j) => j !== i); return next.length ? next : null; });
+  const renameItem = (i, name) => setResults((rs) => rs.map((r, j) => j === i ? { ...r, name } : r));
+
+  // Auto-scan a photo handed in from onboarding ("Snap your closet").
+  useEffect(() => {
+    if (initialPhoto) { processImage(initialPhoto); onConsumeInitial && onConsumeInitial(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPhoto]);
+
+  const processImage = async (dataUrl) => {
+    setPhoto(dataUrl);
+    setResults(null);
+    setError(null);
+    setScanning(true);
+    setStage("Getting ready…");
+    try {
+      const ds = await downscaleDataUrl(dataUrl, 1000);
+      const { items, annotated } = await detectGarments(ds, setStage);
+      setResults(items);
+      if (annotated) setPhoto(annotated); // show the labeled boxes over the photo
+      if (!items.length) setError("No items found — make sure the WHOLE item is in the frame and step back a bit. A close-up of just part of an item won't be recognized.");
+    } catch (e) {
+      setError((e && e.message) || "Something went wrong while scanning.");
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const snap = () => {
+    const d = capture();
+    if (!d) { setError("Couldn't capture from the camera — try Upload instead."); return; }
+    processImage(d);
+  };
+
+  const onFile = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => processImage(reader.result);
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const confirmAll = () => {
+    (results || []).forEach((r) => onAdd({ name: r.name, category: r.category, subcategory: r.subcategory || null, color: r.color, photo: r.photo, id: uid(), fav: false, wash: false }));
+    setResults(null);
+    setPhoto(null);
+    setError(null);
+    setPicker(null);
+  };
+
+  const retake = () => {
+    setResults(null);
+    setPhoto(null);
+    setError(null);
+  };
+
+  return (
+    <div className="pb-28">
+      <h1 className="text-[34px] leading-tight font-black mb-2" style={{ color: "#5A5167" }}>Take a picture to add to closet</h1>
+      <p className="text-[13.5px] font-semibold mb-2" style={{ color: "#A99FB5" }}>
+        Take a picture of your clothes — step back and ensure your clothes are mostly visible.
+      </p>
+
+      {/* Viewfinder */}
+      <div className="relative rounded-3xl overflow-hidden mb-7 mt-6"
+        style={{ aspectRatio: "3/4", background: "linear-gradient(160deg,#2b2b33,#3d3a44)" }}>
+
+        {/* live video (hidden once a photo is frozen) */}
+        <video ref={videoRef} playsInline muted
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ display: camState === "live" && !photo ? "block" : "none" }} />
+
+        {/* frozen captured photo */}
+        {photo && (
+          <img src={photo} alt="capture" className="absolute inset-0 w-full h-full object-cover" />
+        )}
+
+        {/* dim overlay while scanning a photo */}
+        {scanning && photo && <div className="absolute inset-0" style={{ background: "#00000055" }} />}
+
+        <canvas ref={canvasRef} className="hidden" />
+
+        {/* corner guides */}
+        {[["top-4 left-4","border-t-2 border-l-2"],["top-4 right-4","border-t-2 border-r-2"],["bottom-4 left-4","border-b-2 border-l-2"],["bottom-4 right-4","border-b-2 border-r-2"]].map(([pos,b],k)=>(
+          <div key={k} className={`absolute ${pos} ${b} w-10 h-10 rounded-md`} style={{ borderColor: "#FDE9F1" }} />
+        ))}
+
+        <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+          {scanning ? (() => {
+            const pct = loadPct >= 0.999 ? (((stage || "").includes("Naming")) ? 96 : 90) : Math.max(2, Math.round(loadPct * 88));
+            return (
+              <div className="w-full px-8">
+                <Sparkles size={44} className="mb-3 mx-auto animate-bounce text-white" />
+                <div className="text-white/90 font-extrabold text-base text-center">{stage || "Scanning…"}</div>
+                <div className="mx-auto mt-3 h-2 rounded-full overflow-hidden" style={{ background: "#ffffff33", maxWidth: 240 }}>
+                  <div className="h-full rounded-full" style={{ width: pct + "%", background: "#F8A7C5", transition: "width .3s ease" }} />
+                </div>
+                <div className="text-white/80 font-bold text-xs text-center mt-1.5">{pct}%</div>
+                <div className="text-white/50 font-semibold text-[11px] text-center mt-1">First time loads the AI — instant after that.</div>
+              </div>
+            );
+          })() : camState === "starting" ? (
+            <div>
+              <Loader2 size={40} className="mb-2 mx-auto animate-spin text-white/80" />
+              <div className="text-white/70 font-bold text-base">Starting camera…</div>
+            </div>
+          ) : (camState === "denied" || camState === "unavailable") && !photo ? (
+            <div>
+              <CameraIcon size={44} className="mb-2 mx-auto text-white/70" />
+              <div className="text-white/90 font-extrabold text-base mb-1">{camState === "denied" ? "Camera access blocked" : "No camera available"}</div>
+              <div className="text-white/60 font-semibold text-sm mb-3">Use Upload below, or allow the camera and retry.</div>
+              <button onClick={startCamera} className="px-4 py-2 rounded-full text-[13px] font-extrabold" style={{ background: "#FBB8D2", color: "#7A3556" }}>Retry camera</button>
+            </div>
+          ) : (!photo && camState === "live") ? (
+            <div className="text-white/70 font-bold text-base self-end mb-4" style={{ position: "absolute", bottom: 0 }}>Frame a full outfit & tap the shutter</div>
+          ) : null}
+        </div>
+
+        {/* scan line */}
+        {scanning && (
+          <div className="absolute left-0 right-0 h-1" style={{ background: "#F8A7C5", boxShadow: "0 0 16px 4px #F8A7C5", animation: "scan 1.5s linear infinite" }} />
+        )}
+      </div>
+
+      {/* hidden upload input */}
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
+
+      {/* Shutter + Upload */}
+      {!results && !scanning && (
+        <div className="flex flex-col items-center gap-4 mt-2">
+          <button onClick={snap} disabled={camState === "starting"}
+            className="w-24 h-24 rounded-full flex items-center justify-center active:scale-90 transition-transform disabled:opacity-50"
+            style={{ background: "#fff", boxShadow: "0 0 0 6px #FBD0E2, 0 8px 24px -4px #F3B6D055" }}>
+            <CameraIcon size={36} color="#E891B5" />
+          </button>
+          <button onClick={() => fileRef.current && fileRef.current.click()}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-full text-[13px] font-extrabold active:scale-95 transition-transform"
+            style={{ background: "#F4EEF5", color: "#8A7FA0" }}>
+            <Plus size={16} /> Upload a photo
+          </button>
+        </div>
+      )}
+
+      {/* Error */}
+      {error && !scanning && (
+        <div className="rounded-3xl p-4 mt-4 text-center" style={{ background: "#FCEDE6" }}>
+          <div className="text-[13.5px] font-bold" style={{ color: "#CC8567" }}>{error}</div>
+          <div className="flex items-center justify-center gap-4 mt-2">
+            {photo && <button onClick={addManual} className="text-[13px] font-extrabold" style={{ color: "#C56B96" }}>Add it manually</button>}
+            <button onClick={retake} className="text-[13px] font-extrabold" style={{ color: "#C99BB5" }}>Try again</button>
+          </div>
+        </div>
+      )}
+
+      {/* Results — every garment found in the photo */}
+      {results && results.length > 0 && (
+        <div className="rounded-3xl p-5 mt-1" style={{ background: "#FDE9F1" }}>
+          <div className="text-[16px] font-black mb-1" style={{ color: "#C56B96" }}>
+            Identified {results.length} piece{results.length !== 1 ? "s" : ""}
+          </div>
+          <div className="text-[12px] font-semibold mb-3" style={{ color: "#C99BB5" }}>
+            See them outlined on your photo above — add the ones you want.
+          </div>
+          <div className="space-y-2.5 mb-4">
+            {results.map((r, i) => (
+              <div key={i} className="flex items-center gap-3 p-2.5 rounded-2xl" style={{ background: "#ffffffcc" }}>
+                <div className="w-14 h-14 rounded-xl overflow-hidden flex items-center justify-center shrink-0" style={{ background: "#fff" }}>
+                  <img src={r.photo} alt="" className="w-full h-full object-contain" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <input value={r.name} onChange={(e) => renameItem(i, e.target.value)} spellCheck={false}
+                    className="text-[14px] font-black w-full bg-transparent outline-none rounded px-1 -ml-1 focus:bg-white"
+                    style={{ color: "#5A5167" }} />
+                  <div className="flex gap-1.5 mt-1 flex-wrap items-center">
+                    <button onClick={() => setPicker(i)} className="px-2 py-0.5 rounded-full text-[10px] font-extrabold flex items-center gap-1" style={{ background: "#FDE9F1", color: "#C56B96" }}>
+                      {r.category}{r.subcategory ? " · " + r.subcategory : ""} <ChevronDown size={10} />
+                    </button>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold" style={{ background: "#F1ECFB", color: "#8E78C0" }}>{r.color}</span>
+                  </div>
+                </div>
+                <button onClick={() => removeItem(i)} aria-label="remove item"
+                  className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform" style={{ background: "#FAD4D4" }}>
+                  <X size={16} color="#D96A6A" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button onClick={addManual}
+            className="w-full py-2.5 mb-3 rounded-2xl text-[13px] font-extrabold flex items-center justify-center gap-1.5 border-2 border-dashed"
+            style={{ borderColor: "#F3C6DC", color: "#C56B96", background: "#fff7fb" }}>
+            <Plus size={16} /> Add a piece manually (jewelry, hairclip…)
+          </button>
+          <button onClick={confirmAll}
+            className="w-full py-3.5 rounded-2xl text-white font-black text-[15px] flex items-center justify-center gap-2 active:scale-95 transition-transform"
+            style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>
+            <Check size={20} /> Add {results.length} to Closet
+          </button>
+          <button onClick={retake} className="w-full py-3 mt-1 text-[13px] font-bold" style={{ color: "#C99BB5" }}>Retake</button>
+        </div>
+      )}
+
+      {/* Category picker sheet */}
+      {picker !== null && results && results[picker] && (
+        <div className="fixed inset-0 z-50 flex items-end" style={{ background: "#00000055" }} onClick={() => setPicker(null)}>
+          <div className="w-full rounded-t-3xl p-5 pb-9 mx-auto" style={{ maxWidth: 430, background: "#fff" }} onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full" style={{ background: "#EFE3F0" }} />
+            <div className="text-[16px] font-black mb-3" style={{ color: "#5A5167" }}>Where does this go?</div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {CATEGORIES.map((c) => {
+                const on = results[picker].category === c.key;
+                return (
+                  <button key={c.key} onClick={() => setItemCategory(picker, c.key, results[picker].subcategory)}
+                    className="px-4 py-2 rounded-full text-[14px] font-extrabold active:scale-95 transition-all"
+                    style={{ background: on ? "#FDE9F1" : "#F4EEF5", color: on ? "#C56B96" : "#A99FB5" }}>{c.key}</button>
+                );
+              })}
+            </div>
+            {results[picker].category === "Accessories" && (
+              <>
+                <div className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: "#A99FB5" }}>Sub-category</div>
+                <div className="flex flex-wrap gap-2">
+                  {ACCESSORY_SUBCATS.map((s) => {
+                    const on = results[picker].subcategory === s.key;
+                    return (
+                      <button key={s.key} onClick={() => setItemCategory(picker, "Accessories", s.key)}
+                        className="px-4 py-2 rounded-full text-[13px] font-extrabold active:scale-95 transition-all"
+                        style={{ background: on ? "#F1ECFB" : "#F4EEF5", color: on ? "#8E78C0" : "#A99FB5" }}>{s.key}</button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+            <button onClick={() => setPicker(null)} className="w-full mt-6 py-3 rounded-2xl text-white font-black" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>Done</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Toast ---------- */
+function Toast({ msg }) {
+  if (!msg) return null;
+  return (
+    <div className="fixed left-1/2 -translate-x-1/2 px-5 py-3 rounded-full font-extrabold text-[13px] text-white z-50"
+      style={{ bottom: 110, background: "#7E6CA8", boxShadow: "0 8px 24px -6px #7E6CA8aa" }}>
+      {msg}
+    </div>
+  );
+}
+
+/* ================= ONBOARDING ================= */
+function Onboarding({ onDone }) {
+  const [step, setStep] = useState("base"); // base | aesthetic | closet
+  const [base, setBase] = useState(null);   // "Cali" | "Korean"
+  const [picked, setPicked] = useState([]);
+
+  const toggle = (a) =>
+    setPicked((p) => (p.includes(a) ? p.filter((x) => x !== a) : [...p, a]));
+
+  const Progress = ({ n }) => (
+    <div className="flex gap-2 mb-10">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="h-1.5 rounded-full flex-1" style={{ background: i < n ? "#F3A7CB" : "#EFE3F0" }} />
+      ))}
+    </div>
+  );
+
+  return (
+    <div style={{ fontFamily: "'Nunito', sans-serif", background: "linear-gradient(180deg,#FDF1F6,#F1F4FC)", minHeight: "100vh" }}>
+      <div className="mx-auto relative" style={{ maxWidth: 430, minHeight: "100vh", background: "linear-gradient(180deg,#FFFCFE,#FBFAFF)" }}>
+        {step === "base" ? (
+          <div className="px-6 pt-16 pb-10">
+            <Progress n={1} />
+            <div className="text-[15px] font-black tracking-widest mb-2" style={{ color: "#C56B96" }}>WELCOME TO FITCHECK</div>
+            <h1 className="text-[38px] leading-tight font-black mb-2" style={{ color: "#5A5167" }}>Which style do you prefer?</h1>
+            <p className="text-[16px] font-semibold mb-6" style={{ color: "#A99FB5" }}>We'll base your looks on this vibe — then layer your aesthetics on top.</p>
+
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { k: "Cali", sub: "Sun-washed, relaxed, easy", bg: "#FFF6DE", text: "#C39A3E" },
+                { k: "Korean", sub: "Clean, trend-forward, polished", bg: "#F1ECFB", text: "#8E78C0" },
+              ].map((o) => {
+                const on = base === o.k;
+                return (
+                  <button key={o.k} onClick={() => setBase(o.k)}
+                    className="rounded-3xl p-5 text-left active:scale-95 transition-all"
+                    style={{ background: o.bg, minHeight: 140, outline: on ? `3px solid ${o.text}` : "3px solid transparent" }}>
+                    <div className="text-[24px] font-black" style={{ color: o.text }}>{o.k}</div>
+                    <div className="text-[12.5px] font-bold mt-1" style={{ color: o.text + "cc" }}>{o.sub}</div>
+                    {on && <div className="mt-3"><Check size={18} color={o.text} /></div>}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full px-6 pb-7" style={{ maxWidth: 430 }}>
+              <button disabled={!base} onClick={() => setStep("aesthetic")}
+                className="w-full py-4 rounded-full text-white font-black text-[16px] flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-40"
+                style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)", boxShadow: "0 12px 30px -6px #F3B6D0aa" }}>
+                {base ? "Continue" : "Pick one"}{base && <ArrowRight size={20} />}
+              </button>
+            </div>
+          </div>
+        ) : step === "aesthetic" ? (
+          <div className="px-6 pt-16 pb-10">
+            <Progress n={2} />
+            <button onClick={() => setStep("base")} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-4" style={{ color: "#A99FB5" }}>
+              <ArrowLeft size={18} /> Back
+            </button>
+            <h1 className="text-[38px] leading-tight font-black mb-2" style={{ color: "#5A5167" }}>What's your aesthetic?</h1>
+            <p className="text-[16px] font-semibold mb-5" style={{ color: "#A99FB5" }}>Pick the vibes you love — they layer on top of your {base} base.</p>
+
+            <div className="flex flex-wrap gap-2.5">
+              {AESTHETICS.map((a, i) => {
+                const on = picked.includes(a);
+                const p = PASTELS[i % PASTELS.length];
+                return (
+                  <button key={a} onClick={() => toggle(a)}
+                    className="px-5 py-3 rounded-full text-[15px] font-extrabold active:scale-95 transition-all"
+                    style={{
+                      background: on ? p.bg : "#F6EEF6",
+                      color: on ? p.text : "#A99FB5",
+                      transform: on ? "scale(1.03)" : "scale(1)",
+                    }}>
+                    {a}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="text-[13px] font-semibold mt-5 flex items-center gap-1.5" style={{ color: "#B8AFC6" }}>
+              <Sparkles size={13} /> You can always change these later in your Profile.
+            </p>
+
+            <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full px-6 pb-7" style={{ maxWidth: 430 }}>
+              <button disabled={picked.length === 0} onClick={() => setStep("closet")}
+                className="w-full py-4 rounded-full text-white font-black text-[16px] flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-40"
+                style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)", boxShadow: "0 12px 30px -6px #F3B6D0aa" }}>
+                {picked.length === 0 ? "Pick at least one" : "Continue"}
+                {picked.length > 0 && <ArrowRight size={20} />}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <OnboardingCloset
+            onBack={() => setStep("aesthetic")}
+            onFinish={(photo) => onDone({ aesthetics: picked, baseStyle: base, closetPhoto: photo })}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OnboardingCloset({ onBack, onFinish }) {
+  const { videoRef, canvasRef, camState, startCamera, capture } = useCamera();
+  const [photo, setPhoto] = useState(null);
+  const fileRef = useRef(null);
+
+  const snap = () => setPhoto(capture());
+  const onFile = (e) => { const f = e.target.files && e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => setPhoto(r.result); r.readAsDataURL(f); e.target.value = ""; };
+
+  return (
+    <div className="px-6 pt-16 pb-10">
+      {/* progress */}
+      <div className="flex gap-2 mb-10">
+        <div className="h-1.5 rounded-full flex-1" style={{ background: "#F3A7CB" }} />
+        <div className="h-1.5 rounded-full flex-1" style={{ background: "#F3A7CB" }} />
+      </div>
+
+      <button onClick={onBack} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-4" style={{ color: "#A99FB5" }}>
+        <ArrowLeft size={18} /> Back
+      </button>
+
+      <h1 className="text-[30px] leading-tight font-black mb-2" style={{ color: "#5A5167" }}>Snap your closet</h1>
+      <p className="text-[15px] font-semibold mb-6" style={{ color: "#A99FB5" }}>Point your camera at your closet so we can start building your wardrobe.</p>
+
+      {/* Viewfinder */}
+      <div className="relative rounded-3xl overflow-hidden mb-6"
+        style={{ aspectRatio: "3/4", background: "linear-gradient(160deg,#2b2b33,#3d3a44)" }}>
+        <video ref={videoRef} playsInline muted
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ display: camState === "live" && !photo ? "block" : "none" }} />
+        {photo && <img src={photo} alt="closet" className="absolute inset-0 w-full h-full object-cover" />}
+        <canvas ref={canvasRef} className="hidden" />
+
+        {[["top-4 left-4","border-t-2 border-l-2"],["top-4 right-4","border-t-2 border-r-2"],["bottom-4 left-4","border-b-2 border-l-2"],["bottom-4 right-4","border-b-2 border-r-2"]].map(([pos,b],k)=>(
+          <div key={k} className={`absolute ${pos} ${b} w-10 h-10 rounded-md`} style={{ borderColor: "#FDE9F1" }} />
+        ))}
+
+        {!photo && (
+          <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+            {camState === "starting" ? (
+              <div>
+                <Loader2 size={36} className="mb-2 mx-auto animate-spin text-white/80" />
+                <div className="text-white/70 font-bold text-sm">Starting camera…</div>
+              </div>
+            ) : camState === "denied" ? (
+              <div>
+                <CameraIcon size={40} className="mb-2 mx-auto text-white/70" />
+                <div className="text-white/90 font-extrabold text-sm mb-1">Camera access blocked</div>
+                <div className="text-white/60 font-semibold text-xs mb-3">Allow camera in your browser, then retry.</div>
+                <button onClick={startCamera} className="px-4 py-2 rounded-full text-[12px] font-extrabold" style={{ background: "#FBB8D2", color: "#7A3556" }}>Retry</button>
+              </div>
+            ) : camState === "unavailable" ? (
+              <div>
+                <CameraIcon size={40} className="mb-2 mx-auto text-white/70" />
+                <div className="text-white/90 font-extrabold text-sm mb-1">No camera available</div>
+                <div className="text-white/60 font-semibold text-xs">You can skip this step for now.</div>
+              </div>
+            ) : (
+              <div className="text-white/70 font-bold text-sm self-end mb-4" style={{ position: "absolute", bottom: 0 }}>Frame your closet & tap the shutter</div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Shutter / actions */}
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
+      {!photo ? (
+        <div className="flex flex-col items-center gap-3">
+          <button onClick={snap} disabled={camState === "starting"}
+            className="w-20 h-20 rounded-full flex items-center justify-center active:scale-90 transition-transform disabled:opacity-50"
+            style={{ background: "#fff", boxShadow: "0 0 0 5px #FBD0E2, 0 8px 24px -4px #F3B6D055" }}>
+            <CameraIcon size={30} color="#E891B5" />
+          </button>
+          <button onClick={() => fileRef.current && fileRef.current.click()}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-full text-[13px] font-extrabold active:scale-95 transition-transform"
+            style={{ background: "#F4EEF5", color: "#8A7FA0" }}>
+            <Plus size={16} /> Upload a photo
+          </button>
+          <button onClick={() => onFinish(null)} className="text-[13px] font-bold" style={{ color: "#A99FB5" }}>
+            Skip for now
+          </button>
+        </div>
+      ) : (
+        <div>
+          <button onClick={() => onFinish(photo)}
+            className="w-full py-4 rounded-full text-white font-black text-[16px] flex items-center justify-center gap-2 active:scale-95 transition-transform"
+            style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>
+            <Check size={20} /> Looks good — let's go
+          </button>
+          <button onClick={() => setPhoto(null)} className="w-full py-3 mt-2 text-[13px] font-bold" style={{ color: "#C99BB5" }}>Retake</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================= PROFILE ================= */
+function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle }) {
+  const toggle = (a) =>
+    setAesthetics(aesthetics.includes(a) ? aesthetics.filter((x) => x !== a) : [...aesthetics, a]);
+
+  return (
+    <div className="pb-28">
+      <h1 className="text-[34px] leading-tight font-black mb-5" style={{ color: "#5A5167" }}>Profile</h1>
+
+      {/* header card */}
+      <div className="rounded-3xl p-5 mb-6 flex items-center gap-4" style={{ background: "linear-gradient(120deg,#FDE9F1,#F1ECFB)" }}>
+        <div className="w-16 h-16 rounded-2xl overflow-hidden flex items-center justify-center shrink-0" style={{ background: "#ffffffcc" }}>
+          {closetPhoto ? <img src={closetPhoto} alt="" className="w-full h-full object-cover" /> : <User size={30} color="#C56B96" />}
+        </div>
+        <div>
+          <div className="text-[18px] font-black" style={{ color: "#5A5167" }}>My style</div>
+          <div className="text-[13px] font-bold" style={{ color: "#A99FB5" }}>
+            {closetCount} pieces · {aesthetics.length} aesthetic{aesthetics.length !== 1 ? "s" : ""} · {favorites.length} saved
+          </div>
+        </div>
+      </div>
+
+      {/* aesthetics editor */}
+      <label className="text-[19px] font-black tracking-wide block" style={{ color: "#6E6480" }}>My Aesthetics</label>
+      <p className="text-[13px] font-semibold mt-1 mb-3" style={{ color: "#B8AFC6" }}>Tap to add or remove — pick as many as you like.</p>
+      <div className="flex flex-wrap gap-2.5">
+        {AESTHETICS.map((a, i) => {
+          const on = aesthetics.includes(a);
+          const p = PASTELS[i % PASTELS.length];
+          return (
+            <button key={a} onClick={() => toggle(a)}
+              className="px-5 py-3 rounded-full text-[15px] font-extrabold active:scale-95 transition-all flex items-center gap-1.5"
+              style={{
+                background: on ? p.bg : "#F6EEF6",
+                color: on ? p.text : "#A99FB5",
+                transform: on ? "scale(1.03)" : "scale(1)",
+              }}>
+              {on && <Check size={15} />}
+              {a}
+            </button>
+          );
+        })}
+      </div>
+
+      {aesthetics.length === 0 && (
+        <p className="text-[13px] font-bold mt-4" style={{ color: "#C99BB5" }}>
+          Pick at least one aesthetic so your Stylist looks stay on-vibe.
+        </p>
+      )}
+
+      {/* base style */}
+      <label className="text-[19px] font-black tracking-wide block mt-8" style={{ color: "#6E6480" }}>Base Style</label>
+      <p className="text-[13px] font-semibold mt-1 mb-3" style={{ color: "#B8AFC6" }}>The foundation every look is built on.</p>
+      <div className="flex gap-2.5">
+        {["Cali", "Korean"].map((k) => {
+          const on = baseStyle === k;
+          return (
+            <button key={k} onClick={() => setBaseStyle(k)}
+              className="flex-1 py-3 rounded-2xl text-[15px] font-extrabold active:scale-95 transition-all flex items-center justify-center gap-1.5"
+              style={{ background: on ? "#FDE9F1" : "#F6EEF6", color: on ? "#C56B96" : "#A99FB5", outline: on ? "2px solid #F3A7CB" : "2px solid transparent" }}>
+              {on && <Check size={15} />}{k}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* try new aesthetics toggle */}
+      <div className="mt-6 flex items-center justify-between rounded-3xl p-4" style={{ background: "#F6EEF6" }}>
+        <div className="pr-3">
+          <div className="text-[18px] font-black" style={{ color: "#5A5167" }}>Try new outfit aesthetics</div>
+          <div className="text-[12.5px] font-semibold mt-0.5" style={{ color: "#A99FB5" }}>
+            {tryNew ? "1–2 of your 5 looks will explore something new" : "Leaving this off keeps all generated outfits your preferred vibe"}
+          </div>
+        </div>
+        <button onClick={() => setTryNew(!tryNew)} aria-label="toggle try new aesthetics"
+          className="w-14 h-8 rounded-full p-1 shrink-0 transition-all"
+          style={{ background: tryNew ? "#F3A7CB" : "#DDD0E6" }}>
+          <div className="w-6 h-6 rounded-full bg-white shadow transition-all" style={{ transform: tryNew ? "translateX(24px)" : "translateX(0)" }} />
+        </button>
+      </div>
+
+      {/* favorited outfits */}
+      <label className="text-[19px] font-black tracking-wide block mt-8" style={{ color: "#6E6480" }}>Favorited Outfits</label>
+      <p className="text-[13px] font-semibold mt-1 mb-3" style={{ color: "#B8AFC6" }}>
+        {favorites.length > 0
+          ? "Looks you loved — the Stylist leans into these when you generate."
+          : "Tap the heart on any look in the Stylist tab to save it here."}
+      </p>
+
+      {favorites.length === 0 ? (
+        <div className="rounded-3xl p-8 text-center" style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
+          <div className="w-16 h-16 rounded-3xl mx-auto flex items-center justify-center mb-3" style={{ background: "#ffffffcc" }}>
+            <Heart size={28} color="#C56B96" />
+          </div>
+          <div className="text-[15px] font-black" style={{ color: "#5A5167" }}>No favorites yet</div>
+          <p className="text-[13px] font-semibold mt-1" style={{ color: "#A99FB5" }}>Your saved looks will live here.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          {favorites.map((o, i) => {
+            const p = PASTELS[i % PASTELS.length];
+            return (
+              <div key={o.id} className="rounded-3xl overflow-hidden" style={{ background: p.bg }}>
+                <div className="relative" style={{ height: 150, background: p.ring + "55" }}>
+                  <FavThumb img={o.img} pastel={p} />
+                  <button onClick={() => toggleFav(o)}
+                    className="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                    style={{ background: "#ffffffdd" }}>
+                    <Heart size={15} color={p.text} fill={p.text} />
+                  </button>
+                </div>
+                <div className="p-3">
+                  <div className="text-[14px] font-black leading-tight" style={{ color: p.text }}>{o.title}</div>
+                  <div className="text-[11px] font-bold mt-0.5" style={{ color: p.text + "bb" }}>{o.aesthetic}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FavThumb({ img, pastel }) {
+  const [failed, setFailed] = useState(false);
+  if (img && !failed) {
+    return <img src={img} alt="" onError={() => setFailed(true)} className="absolute inset-0 w-full h-full object-cover" />;
+  }
+  return (
+    <div className="absolute inset-0 flex items-center justify-center">
+      <Shirt size={36} color={pastel.text} />
+    </div>
+  );
+}
+
+/* ================= ROOT ================= */
+function App() {
+  const [onboarded, setOnboarded] = useState(false);
+  const [prefs, setPrefs] = useState({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false });
+  const [tab, setTab] = useState("stylist");
+  const [pendingPhoto, setPendingPhoto] = useState(null); // onboarding photo to auto-scan
+  const [closet, setCloset] = useState(SEED);
+  const [trash, setTrash] = useState(SEED_TRASH);
+  const [favorites, setFavorites] = useState([]);
+  const [toast, setToast] = useState("");
+
+  const toggleFav = (outfit) => {
+    setFavorites((prev) => {
+      if (prev.some((f) => f.id === outfit.id)) {
+        return prev.filter((f) => f.id !== outfit.id);
+      }
+      showToast(`${outfit.title} saved to favorites`);
+      // store a clean copy (drop transient render fields)
+      const { pastel, familiar, ...clean } = outfit;
+      return [clean, ...prev];
+    });
+  };
+
+  useEffect(() => {
+    const id = "nunito-font";
+    if (!document.getElementById(id)) {
+      const l = document.createElement("link");
+      l.id = id; l.rel = "stylesheet";
+      l.href = "https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap";
+      document.head.appendChild(l);
+    }
+    const s = document.createElement("style");
+    s.textContent = `@keyframes scan{0%{top:0}100%{top:100%}}`;
+    document.head.appendChild(s);
+
+    // Warm up BOTH AI models in the background (in parallel) the moment the app
+    // opens — they download while you're in onboarding, so the first scan is fast.
+    (async () => {
+      try { await Promise.allSettled([getDetector(), getClassifier()]); } catch (e) { /* ignore */ }
+    })();
+  }, []);
+
+  const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 1800); };
+
+  const addItem = (item) => {
+    setCloset((c) => [item, ...c]);
+    showToast(`${item.name} added to closet`);
+    setTab("closet");
+  };
+
+  const TABS = [
+    { key: "stylist", label: "Stylist", icon: Sparkles },
+    { key: "closet", label: "Closet", icon: Shirt },
+    { key: "camera", label: "Camera", icon: CameraIcon },
+    { key: "profile", label: "Profile", icon: User },
+  ];
+
+  const setAesthetics = (next) => setPrefs((p) => ({ ...p, aesthetics: next }));
+  const setTryNew = (v) => setPrefs((p) => ({ ...p, tryNew: v }));
+  const setBaseStyle = (v) => setPrefs((p) => ({ ...p, baseStyle: v }));
+
+  const finishOnboarding = (data) => {
+    setPrefs((p) => ({ ...p, ...data }));
+    setOnboarded(true);
+    // If they snapped a closet photo, run it through detection right away.
+    if (data.closetPhoto) { setPendingPhoto(data.closetPhoto); setTab("camera"); }
+  };
+
+  if (!onboarded) {
+    return <Onboarding onDone={finishOnboarding} />;
+  }
+
+  return (
+    <div style={{ fontFamily: "'Nunito', sans-serif", background: "linear-gradient(180deg,#FDF1F6,#F1F4FC)", minHeight: "100vh" }}>
+      <div className="mx-auto relative" style={{ maxWidth: 430, minHeight: "100vh", background: "linear-gradient(180deg,#FFFCFE,#FBFAFF)" }}>
+        <div className="px-5 pt-8">
+          {tab === "stylist" && <StylistTab closet={closet} favorites={favorites} toggleFav={toggleFav} prefs={prefs} />}
+          {tab === "closet" && (
+            <ClosetTab closet={closet} setCloset={setCloset} trash={trash} setTrash={setTrash} goCamera={() => setTab("camera")} />
+          )}
+          {/* Camera stays mounted (just hidden) so a taken photo + AI loading aren't lost when you switch tabs. */}
+          <div style={{ display: tab === "camera" ? "block" : "none" }}>
+            <CameraTab onAdd={addItem} active={tab === "camera"} initialPhoto={pendingPhoto} onConsumeInitial={() => setPendingPhoto(null)} />
+          </div>
+          {tab === "profile" && (
+            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} />
+          )}
+        </div>
+
+        <Toast msg={toast} />
+
+        {/* Bottom nav */}
+        <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full" style={{ maxWidth: 430 }}>
+          <div className="flex justify-around items-center px-2 py-3 mx-3 mb-3 rounded-3xl"
+            style={{ background: "#fff", border: "1.5px solid #F1E6F1", boxShadow: "0 -2px 20px -8px #00000018" }}>
+            {TABS.map((t) => {
+              const Icon = t.icon;
+              const active = tab === t.key;
+              return (
+                <button key={t.key} onClick={() => setTab(t.key)}
+                  className="flex flex-col items-center gap-1 px-3.5 py-1 rounded-2xl transition-all"
+                  style={{ background: active ? "#FDE9F1" : "transparent" }}>
+                  <Icon size={22} color={active ? "#E891B5" : "#C6BCD2"} fill={active && t.key === "stylist" ? "#E891B5" : "none"} />
+                  <span className="text-[11px] font-extrabold" style={{ color: active ? "#E891B5" : "#C6BCD2" }}>{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+const loadingEl = document.getElementById("loading");
+if (loadingEl) loadingEl.remove();
+createRoot(document.getElementById("root")).render(<App />);
+
+</script>
+</body>
+</html>
