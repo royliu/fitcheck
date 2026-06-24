@@ -740,13 +740,38 @@ function PersonGraphic({ pastel, img }) {
    matches the pieces in the look. */
 /* A real online photo of a similar item (matched by color + type from the item's
    name). Falls back to the user's own cutout if it fails to load. */
+/* Curated clean clothing-product photos by garment type (verified). Matched by
+   keyword in the item name; types without a good match fall back to the user's
+   own cutout. (Color isn't matched — these are type-similar inspo shots.) */
+const STOCK_W = "?auto=format&fit=crop&w=300&q=72";
+const CLOTHING_STOCK = [
+  { kw:["sneaker","trainer"], id:"photo-1542291026-7eec264c27ff" },
+  { kw:["boot"], id:"photo-1608256246200-53e635b5b65f" },
+  { kw:["heel","pump","stiletto"], id:"photo-1543163521-1bf539c55dd2" },
+  { kw:["sandal","slide"], id:"photo-1603487742131-4160ec999306" },
+  { kw:["jean"], id:"photo-1542272604-787c3835535d" },
+  { kw:["short"], id:"photo-1591195853828-11db59a44f6b" },
+  { kw:["trouser","pant","legging","cargo","slack","sweatpant"], id:"photo-1594633312681-425c7b97ccd1" },
+  { kw:["dress","jumpsuit"], id:"photo-1595777457583-95e059d581b8" },
+  { kw:["hoodie","sweatshirt"], id:"photo-1556821840-3a63f95609a7" },
+  { kw:["sweater","cardigan","knit","turtleneck"], id:"photo-1576871337622-98d48d1cf531" },
+  { kw:["coat","trench","overcoat","parka"], id:"photo-1539533018447-63fcce2678e3" },
+  { kw:["jacket","blazer","bomber","windbreaker","puffer"], id:"photo-1551028719-00167b16eac5" },
+  { kw:["button","blouse","oxford"], id:"photo-1602810318383-e386cc2a3ccf" },
+  { kw:["shirt","tee","tank","camisole","polo","crop","top"], id:"photo-1521572163474-6864f9cf17ab" },
+  { kw:["bag","tote","clutch","backpack","handbag","purse","crossbody"], id:"photo-1584917865442-de89df76afd3" },
+  { kw:["beanie"], id:"photo-1576871337632-b9aef4c17ab9" },
+  { kw:["hat","cap","beret","bucket"], id:"photo-1521369909029-2afed882baee" },
+  { kw:["sunglass","glass"], id:"photo-1511499767150-a48a237f0083" },
+  { kw:["belt"], id:"photo-1624222247344-550fb60583dc" },
+];
 function stockImageUrl(item){
-  const clean = item.name.toLowerCase().replace(/[^a-z ]/g, "").trim().split(/\s+/).filter(Boolean).join(",");
-  let h = 0; for(let i=0;i<item.name.length;i++) h = (h*31 + item.name.charCodeAt(i)) >>> 0;
-  return "https://loremflickr.com/320/380/" + encodeURIComponent(clean + ",clothing") + "?lock=" + (h % 100000);
+  const n = (item.name||"").toLowerCase();
+  for(const e of CLOTHING_STOCK){ if(e.kw.some(k=>n.includes(k))) return "https://images.unsplash.com/"+e.id+STOCK_W; }
+  return null; // no clean match -> use the user's own cutout
 }
 function StockImg({ item }) {
-  const [src, setSrc] = useState(stockImageUrl(item));
+  const [src, setSrc] = useState(stockImageUrl(item) || item.photo);
   return <img src={src} alt={item.name} className="w-full h-full object-cover"
     onError={() => { if (item.photo && src !== item.photo) setSrc(item.photo); }} />;
 }
@@ -1373,7 +1398,7 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial }) {
               <button onClick={startCamera} className="px-4 py-2 rounded-full text-[13px] font-extrabold" style={{ background: "#FBB8D2", color: "#7A3556" }}>Retry camera</button>
             </div>
           ) : (!photo && camState === "live") ? (
-            <div className="text-white/70 font-bold text-base self-end mb-4" style={{ position: "absolute", bottom: 0 }}>Frame a full outfit & tap the shutter</div>
+            <div className="text-white/70 font-bold text-base self-end mb-4" style={{ position: "absolute", bottom: 0 }}>Frame most of (a) clothing item(s) & tap the shutter</div>
           ) : null}
         </div>
 
@@ -1809,6 +1834,14 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
             </button>
           );
         })}
+      </div>
+
+      <div className="mt-2.5 rounded-2xl p-3.5" style={{ background: baseStyle === "Korean" ? "#F1ECFB" : "#FFF6DE" }}>
+        <div className="text-[13px] font-bold leading-relaxed" style={{ color: baseStyle === "Korean" ? "#8E78C0" : "#C39A3E" }}>
+          {baseStyle === "Korean"
+            ? "Clean, trend-forward, polished — crisp lines and thoughtful proportions for that put-together Korean-street look."
+            : "Sun-washed, relaxed, easy — effortless, beachy California basics with an undone ease."}
+        </div>
       </div>
 
       {/* try new aesthetics toggle */}
