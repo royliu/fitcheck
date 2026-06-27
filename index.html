@@ -69,6 +69,7 @@ const ACCESSORY_SUBCATS = [
   { key: "Belts", icon: Layers },
   { key: "Hair Accessories", icon: Sparkles },
   { key: "Glasses", icon: Search },
+  { key: "Socks", icon: Footprints },
 ];
 
 const AESTHETICS = ["Streetwear","Minimalist","Coquette","Clean Girl","Dark Academia","Grunge","Soft Girl","Cottagecore","Y2K","Romantic Feminine","Boho","Angelcore","Baddie","Hipster","Indie","Kawaii"];
@@ -189,7 +190,7 @@ const DETAIL_CANDIDATES = {
   bottom:["denim jeans","skinny jeans","wide-leg jeans","trousers","leggings","sweatpants","cargo pants","mini skirt","midi skirt","pleated skirt","denim shorts","shorts"],
   dress:["mini dress","midi dress","maxi dress","slip dress","shirt dress","sundress","knit dress","bodycon dress"],
   outer:["denim jacket","leather jacket","blazer","bomber jacket","puffer jacket","trench coat","wool coat","cardigan","windbreaker"],
-  shoes:["sneakers","boots","ankle boots","heels","sandals","loafers","ballet flats","mary janes","mules"],
+  shoes:["sneakers","boots","ankle boots","heels","sandals","loafers","ballet flats","mary janes","mules","socks"],
   bag:["shoulder bag","tote bag","crossbody bag","backpack","clutch","handbag","mini bag"],
   hat:["beanie","baseball cap","bucket hat","beret","wide-brim hat"],
 };
@@ -214,7 +215,13 @@ async function refineLabels(items, onStage){
     for(const it of items){
       const cand=DETAIL_CANDIDATES[it.detLabel]; if(!cand) continue;
       const out=await clf(it.photo, cand, { hypothesis_template:"a photo of a {}" });
-      if(out&&out[0]&&out[0].score>0.18){ it.noun=titleCase(out[0].label); it.name=it.color+" "+it.noun; }
+      if(out&&out[0]&&out[0].score>0.18){
+        const lbl=out[0].label;
+        it.noun=titleCase(lbl); it.name=it.color+" "+it.noun;
+        // Socks aren't a detector class — when the detail model reads a "shoes"
+        // box as socks, file it under Accessories › Socks instead of Shoes.
+        if(lbl==="socks"){ it.category="Accessories"; it.subcategory="Socks"; }
+      }
     }
   }catch(e){ /* keep coarse labels */ }
   return items;
@@ -863,9 +870,11 @@ function stockImageUrl(item){
   return null; // no clean match -> use the user's own cutout
 }
 function StockImg({ item }) {
-  const [src, setSrc] = useState(stockImageUrl(item) || item.photo);
+  // Prefer the user's own cutout so the picture matches the exact item they shot;
+  // fall back to a type-matched stock photo for manually-added items (no photo).
+  const [src, setSrc] = useState(item.photo || stockImageUrl(item));
   return <img src={src} alt={item.name} className="w-full h-full object-cover"
-    onError={() => { if (item.photo && src !== item.photo) setSrc(item.photo); }} />;
+    onError={() => { const sb = stockImageUrl(item); if (sb && src !== sb) setSrc(sb); }} />;
 }
 function OutfitCollage({ items, pastel }) {
   const list = (items || []).slice(0, 5);
@@ -1008,6 +1017,10 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather }) {
           </div>
           {outfits.map((o, i) => (
             <div key={i} className="rounded-3xl p-4" style={{ background: o.pastel.bg }}>
+              <PersonGraphic pastel={o.pastel} img={o.img} />
+              <div className="text-[11px] font-bold mt-2 mb-2 flex items-center gap-1.5" style={{ color: o.pastel.text }}>
+                <User size={12} /> {prefs?.baseStyle === "Korean" ? "Korean" : "Cali"} vibe · your actual pieces below
+              </div>
               <OutfitCollage items={o.items} pastel={o.pastel} />
               <div className="flex items-center justify-between mt-3 gap-2">
                 <h3 className="text-[17px] font-black" style={{ color: o.pastel.text }}>{o.title}</h3>
@@ -1516,7 +1529,7 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial }) {
               <button onClick={startCamera} className="px-4 py-2 rounded-full text-[13px] font-extrabold" style={{ background: "#FBB8D2", color: "#7A3556" }}>Retry camera</button>
             </div>
           ) : (!photo && camState === "live") ? (
-            <div className="text-white/70 font-bold text-base self-end mb-4" style={{ position: "absolute", bottom: 0 }}>Frame most of (a) clothing item(s) & tap the shutter</div>
+            <div className="text-white/70 font-bold text-base self-end mb-4" style={{ position: "absolute", bottom: 0 }}>Frame your clothes & tap the shutter</div>
           ) : null}
         </div>
 
@@ -1850,7 +1863,7 @@ function OnboardingCloset({ onBack, onFinish }) {
                 <div className="text-white/60 font-semibold text-xs">You can skip this step for now.</div>
               </div>
             ) : (
-              <div className="text-white/70 font-bold text-sm self-end mb-4" style={{ position: "absolute", bottom: 0 }}>Frame your closet & tap the shutter</div>
+              <div className="text-white/70 font-bold text-sm self-end mb-4" style={{ position: "absolute", bottom: 0 }}>Frame your clothes & tap the shutter</div>
             )}
           </div>
         )}
