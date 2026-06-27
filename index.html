@@ -131,9 +131,9 @@ const DET_MEAN = [0.485, 0.456, 0.406], DET_STD = [0.229, 0.224, 0.225];
 const DET_SHORTEST = 640, DET_LONGEST = 1333, DET_THRESHOLD = 0.3;
 
 // --- model-load progress (so the scan screen can show a real % bar) ---
-let _dlDet = 0, _dlClip = 0;
+let _dlDet = 0, _dlClip = 0, _dlSeg = 0;
 const _mpSubs = new Set();
-function modelProgress(){ return 0.6 * _dlDet + 0.4 * _dlClip; }
+function modelProgress(){ return 0.5 * _dlDet + 0.2 * _dlClip + 0.3 * _dlSeg; }
 function emitModelProgress(){ const p = modelProgress(); _mpSubs.forEach((f) => f(p)); }
 function onModelProgress(fn){ _mpSubs.add(fn); fn(modelProgress()); return () => _mpSubs.delete(fn); }
 
@@ -225,6 +225,77 @@ async function refineLabels(items, onStage){
     }
   }catch(e){ /* keep coarse labels */ }
   return items;
+}
+
+/* --- per-garment background removal (clothes-parsing segmentation) ---
+   Isolates ONLY the detected garment's pixels (e.g. the skirt, not the tee worn
+   with it), drops the room/background, and re-renders the cutout on transparency
+   at higher resolution. Best-effort: keeps the rectangular crop if the parser
+   can't find the garment (e.g. a flat-lay photo with no body). */
+const SEG_CLASSES = {
+  top:["Upper-clothes"], outer:["Upper-clothes"], bottom:["Skirt","Pants"],
+  dress:["Dress"], shoes:["Left-shoe","Right-shoe"], bag:["Bag"], hat:["Hat"],
+};
+let _segMod=null,_parser=null;
+async function getParser(onStage){
+  if(!_segMod){ _segMod=await import("@huggingface/transformers"); _segMod.env.allowLocalModels=false; }
+  if(!_parser){
+    onStage&&onStage("Loading cutout model…");
+    _parser=await _segMod.pipeline("image-segmentation","Xenova/segformer_b2_clothes",{
+      progress_callback:(x)=>{ if(x&&x.status==="progress"&&x.total){ _dlSeg=Math.min(1,(x.loaded||0)/x.total); emitModelProgress(); } },
+    });
+    _dlSeg=1; emitModelProgress();
+  }
+  return _parser;
+}
+async function cutoutItems(items, sc, W, H, onStage){
+  try{
+    if(!items.length) return;
+    const parser=await getParser(onStage);
+    onStage&&onStage("Removing backgrounds…");
+    const ps=Math.min(1, 1024/Math.max(W,H));           // parse at <=1024 for speed
+    const pw=Math.round(W*ps), ph=Math.round(H*ps);
+    const pcv=document.createElement("canvas"); pcv.width=pw; pcv.height=ph;
+    pcv.getContext("2d").drawImage(sc,0,0,pw,ph);
+    const segs=await parser(pcv.toDataURL("image/jpeg",0.92));
+    const masks=new Map();
+    for(const s of segs){ if(s&&s.label&&s.mask&&s.mask.data) masks.set(s.label,s.mask.data); }
+    const mW=pw, mH=ph;
+    for(const it of items){
+      const cls=SEG_CLASSES[it.detLabel]; if(!cls) continue;
+      const layers=cls.map((c)=>masks.get(c)).filter(Boolean);
+      if(!layers.length) continue;                       // garment class not segmented → keep crop
+      const [x1,y1,x2,y2]=it.bbox;
+      const exX=Math.round((x2-x1)*0.06), exY=Math.round((y2-y1)*0.06);
+      const bx1=Math.max(0,x1-exX), by1=Math.max(0,y1-exY), bx2=Math.min(W,x2+exX), by2=Math.min(H,y2+exY);
+      const cw=bx2-bx1, ch=by2-by1; if(cw<6||ch<6) continue;
+      const up=Math.min(2, Math.max(1, 560/Math.max(cw,ch)));   // upscale small crops for quality
+      const ow=Math.round(cw*up), oh=Math.round(ch*up);
+      const oc=document.createElement("canvas"); oc.width=ow; oc.height=oh;
+      const ox=oc.getContext("2d"); ox.imageSmoothingEnabled=true; ox.imageSmoothingQuality="high";
+      ox.drawImage(sc, bx1,by1,cw,ch, 0,0,ow,oh);
+      const idata=ox.getImageData(0,0,ow,oh); const px=idata.data;
+      let nz=0,minx=ow,miny=oh,maxx=0,maxy=0;
+      for(let yy=0; yy<oh; yy++){
+        const sy=by1+(yy/oh)*ch; const my=Math.min(mH-1,Math.round(sy*ps));
+        for(let xx=0; xx<ow; xx++){
+          const sx=bx1+(xx/ow)*cw; const mx=Math.min(mW-1,Math.round(sx*ps));
+          let m=0; for(const L of layers){ const v=L[my*mW+mx]; if(v>m)m=v; }
+          const a=m<90?0:(m>160?255:Math.round((m-90)/70*255));  // soft edge
+          const ai=(yy*ow+xx)*4+3; px[ai]=Math.round(px[ai]*(a/255));
+          if(a>30){ nz++; if(xx<minx)minx=xx; if(xx>maxx)maxx=xx; if(yy<miny)miny=yy; if(yy>maxy)maxy=yy; }
+        }
+      }
+      if(nz < ow*oh*0.02) continue;                      // too little matched → keep crop
+      ox.putImageData(idata,0,0);
+      const pad=Math.round(Math.max(ow,oh)*0.04);
+      minx=Math.max(0,minx-pad); miny=Math.max(0,miny-pad); maxx=Math.min(ow-1,maxx+pad); maxy=Math.min(oh-1,maxy+pad);
+      const fw=maxx-minx+1, fh=maxy-miny+1; if(fw<4||fh<4) continue;
+      const fc=document.createElement("canvas"); fc.width=fw; fc.height=fh;
+      fc.getContext("2d").drawImage(oc, minx,miny,fw,fh, 0,0,fw,fh);
+      it.photo=fc.toDataURL("image/png");
+    }
+  }catch(e){ /* keep rectangular crops */ }
 }
 
 const COLOR_PALETTE = [
@@ -348,8 +419,18 @@ async function detectGarments(dataUrl,onStage){
     dets.push({score:best,label:DET_LABELS[bj],box});
   }
   dets.sort((a,b)=>b.score-a.score);
-  const kept=[];
+  let kept=[];
   for(const d of dets){ if(kept.every(k=>!((k.label===d.label && iou(k.box,d.box)>0.6) || iou(k.box,d.box)>0.85))) kept.push(d); }
+
+  // A pair of shoes is two boxes — collapse them into ONE item (the union box) so
+  // the closet shows a single pair, not a left and right shoe separately.
+  const shoeDets=kept.filter((k)=>k.label==="shoes");
+  if(shoeDets.length>1){
+    const xs=shoeDets.flatMap((s)=>[s.box[0],s.box[2]]), ys=shoeDets.flatMap((s)=>[s.box[1],s.box[3]]);
+    const merged={label:"shoes",score:Math.max(...shoeDets.map((s)=>s.score)),
+      box:[Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)]};
+    kept=kept.filter((k)=>k.label!=="shoes").concat([merged]);
+  }
 
   const sc=document.createElement("canvas");sc.width=W;sc.height=H;
   const sx=sc.getContext("2d",{willReadFrequently:true});sx.drawImage(img,0,0,W,H);
@@ -378,6 +459,7 @@ async function detectGarments(dataUrl,onStage){
   }
   items.sort((a,b)=>b.area-a.area);
   await refineLabels(items,onStage);
+  await cutoutItems(items, sc, W, H, onStage);
   const annotated=items.length?annotatePhoto(img,W,H,items):null;
   return {items:items.map(({area,bbox,detLabel,noun,...r})=>r),annotated};
 }
@@ -873,7 +955,7 @@ function StockImg({ item }) {
   // Prefer the user's own cutout so the picture matches the exact item they shot;
   // fall back to a type-matched stock photo for manually-added items (no photo).
   const [src, setSrc] = useState(item.photo || stockImageUrl(item));
-  return <img src={src} alt={item.name} className="w-full h-full object-cover"
+  return <img src={src} alt={item.name} className="w-full h-full object-contain"
     onError={() => { const sb = stockImageUrl(item); if (sb && src !== sb) setSrc(sb); }} />;
 }
 function OutfitCollage({ items, pastel }) {
@@ -1042,7 +1124,7 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather }) {
                   <div key={k} className="flex items-center gap-2.5 px-3 py-2 rounded-2xl" style={{ background: "#ffffff99" }}>
                     <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 overflow-hidden" style={{ background: o.pastel.ring }}>
                       {it.photo
-                        ? <img src={it.photo} alt="" className="w-full h-full object-cover" />
+                        ? <img src={it.photo} alt="" className="w-full h-full object-contain" />
                         : <CatIcon category={it.category} size={15} color={o.pastel.text} />}
                     </div>
                     <span className="text-[13px] font-extrabold" style={{ color: "#5A5167" }}>{it.name}</span>
@@ -1074,6 +1156,74 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather }) {
           style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)", boxShadow: "0 12px 30px -6px #F3B6D0aa, 0 4px 10px #00000015" }}>
           {generating ? <Loader2 size={22} className="animate-spin" /> : <Sparkles size={22} />}
           {generating ? "Styling…" : "Generate Outfits"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* A closet item card you SWIPE left to reveal the trash button, then tap to delete. */
+function ClosetItemRow({ item, onTrash, onToggleWash, onToggleFav }) {
+  const REVEAL = 84;
+  const [open, setOpen] = useState(false);
+  const [drag, setDrag] = useState(null);   // live offset (px, negative) while dragging
+  const startX = useRef(null);
+  const base = useRef(0);
+  const cur = useRef(0);
+  const moved = useRef(false);
+  const p = PASTELS[item.name.length % 5];
+
+  const down = (e) => {
+    startX.current = e.clientX; base.current = open ? -REVEAL : 0; cur.current = base.current; moved.current = false;
+    setDrag(base.current);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+  };
+  const mv = (e) => {
+    if (startX.current == null) return;
+    const dxm = e.clientX - startX.current;
+    if (Math.abs(dxm) > 6) moved.current = true;
+    cur.current = Math.max(-REVEAL, Math.min(0, base.current + dxm));
+    setDrag(cur.current);
+  };
+  const up = () => {
+    if (startX.current == null) return;
+    setOpen(cur.current < -REVEAL / 2);
+    setDrag(null); startX.current = null;
+  };
+  const tx = drag != null ? drag : (open ? -REVEAL : 0);
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl">
+      {/* trash reveal */}
+      <div className="absolute right-0 top-0 bottom-0 flex items-center justify-center"
+        style={{ background: "#FAD4D4", width: REVEAL }}>
+        <button onClick={() => onTrash(item.id)} className="flex flex-col items-center gap-0.5 px-2">
+          <Trash2 size={20} color="#D96A6A" />
+          <span className="text-[10px] font-extrabold" style={{ color: "#D96A6A" }}>Delete</span>
+        </button>
+      </div>
+      <div className="flex items-center gap-3 p-3"
+        style={{ background: "#fff", border: "1.5px solid #F1E6F1", touchAction: "pan-y",
+          transform: `translateX(${tx}px)`, transition: drag == null ? "transform .22s cubic-bezier(.2,.8,.2,1)" : "none" }}
+        onPointerDown={down} onPointerMove={mv} onPointerUp={up} onPointerCancel={up}
+        onClick={() => { if (!moved.current && open) setOpen(false); }}>
+        <div className="rounded-2xl flex items-center justify-center shrink-0 overflow-hidden"
+          style={{ width: 52, height: 52, background: p.bg }}>
+          {item.photo
+            ? <img src={item.photo} alt="" className="w-full h-full object-contain" />
+            : <CatIcon category={item.category} size={22} color={p.text} />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[15px] font-extrabold truncate" style={{ color: "#5A5167" }}>{item.name}</div>
+          <div className="text-[12px] font-semibold" style={{ color: "#A99FB5" }}>{item.color}</div>
+        </div>
+        <button onClick={(e) => { e.stopPropagation(); if (moved.current) return; onToggleWash(item.id); }}
+          className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: item.wash ? "#E6F2FB" : "#F4EEF5" }}>
+          <WashingMachine size={17} color={item.wash ? "#5D87A8" : "#C6BCD2"} />
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); if (moved.current) return; onToggleFav(item.id); }}
+          className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: item.fav ? "#FDE9F1" : "#F4EEF5" }}>
+          <Heart size={17} color={item.fav ? "#E891B5" : "#C6BCD2"} fill={item.fav ? "#E891B5" : "none"} />
         </button>
       </div>
     </div>
@@ -1122,42 +1272,12 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
       <div className="rounded-2xl flex items-center justify-center shrink-0 overflow-hidden"
         style={{ width: size, height: size, background: p.bg }}>
         {item.photo
-          ? <img src={item.photo} alt="" className="w-full h-full object-cover" />
+          ? <img src={item.photo} alt="" className="w-full h-full object-contain" />
           : <CatIcon category={item.category} size={size * 0.42} color={p.text} />}
       </div>
     );
   };
 
-  const ItemRow = ({ item }) => (
-    <div className="relative overflow-hidden rounded-2xl">
-      {/* trash reveal */}
-      <div className="absolute right-0 top-0 bottom-0 flex items-center pr-4"
-        style={{ background: "#FAD4D4", width: 80 }}>
-        <button onClick={() => toTrash(item.id)} className="text-white">
-          <Trash2 size={22} color="#D96A6A" />
-        </button>
-      </div>
-      <div className="flex items-center gap-3 p-3 transition-transform"
-        style={{ background: "#fff", transform: swiped === item.id ? "translateX(-80px)" : "translateX(0)", border: "1.5px solid #F1E6F1" }}
-        onClick={() => setSwiped(swiped === item.id ? null : item.id)}>
-        <Thumb item={item} />
-        <div className="flex-1 min-w-0">
-          <div className="text-[15px] font-extrabold truncate" style={{ color: "#5A5167" }}>{item.name}</div>
-          <div className="text-[12px] font-semibold" style={{ color: "#A99FB5" }}>{item.color}</div>
-        </div>
-        <button onClick={(e) => { e.stopPropagation(); toggleWash(item.id); }}
-          className="w-9 h-9 rounded-xl flex items-center justify-center"
-          style={{ background: item.wash ? "#E6F2FB" : "#F4EEF5" }}>
-          <WashingMachine size={17} color={item.wash ? "#5D87A8" : "#C6BCD2"} />
-        </button>
-        <button onClick={(e) => { e.stopPropagation(); toggleFav(item.id); }}
-          className="w-9 h-9 rounded-xl flex items-center justify-center"
-          style={{ background: item.fav ? "#FDE9F1" : "#F4EEF5" }}>
-          <Heart size={17} color={item.fav ? "#E891B5" : "#C6BCD2"} fill={item.fav ? "#E891B5" : "none"} />
-        </button>
-      </div>
-    </div>
-  );
 
   /* ---- Trash view ---- */
   if (inTrash) {
@@ -1235,7 +1355,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
           <ArrowLeft size={18} /> {activeSub ? "Accessories" : "Categories"}
         </button>
         <h1 className="text-2xl font-black mb-1" style={{ color: "#5A5167" }}>{title}</h1>
-        <p className="text-sm font-semibold mb-2" style={{ color: "#A99FB5" }}>{plural(items.length, "piece")} · tap a card to reveal trash</p>
+        <p className="text-sm font-semibold mb-2" style={{ color: "#A99FB5" }}>{plural(items.length, "piece")} · swipe a card left to delete</p>
         <div className="space-y-3 mt-4">
           {items.length === 0 ? (
             <div className="rounded-3xl p-8 text-center" style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
@@ -1246,7 +1366,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
               <p className="text-[13px] font-semibold mt-1" style={{ color: "#A99FB5" }}>Snap a piece below to add it here.</p>
             </div>
           ) : (
-            items.map((item) => <ItemRow key={item.id} item={item} />)
+            items.map((item) => <ClosetItemRow key={item.id} item={item} onTrash={toTrash} onToggleWash={toggleWash} onToggleFav={toggleFav} />)
           )}
         </div>
         <button onClick={goCamera}
@@ -1273,7 +1393,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
       {searching ? (
         <div className="space-y-3">
           <p className="text-[13px] font-bold" style={{ color: "#A99FB5" }}>{results.length} match{results.length !== 1 ? "es" : ""}</p>
-          {results.map((item) => <ItemRow key={item.id} item={item} />)}
+          {results.map((item) => <ClosetItemRow key={item.id} item={item} onTrash={toTrash} onToggleWash={toggleWash} onToggleFav={toggleFav} />)}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3">
