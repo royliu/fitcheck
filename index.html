@@ -528,6 +528,98 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
   return outfits.slice(0,5);
 }
 
+/* ---------- AI stylist (optional) ----------
+   When the user has saved their own Anthropic API key, outfits are composed by
+   Claude with current good-style/social-media fashion sense, using ONLY the real
+   closet items. The key lives only in the browser (localStorage), never in code.
+   Falls back to buildOutfits() on any error. */
+const AI_KEY_LS = "fitcheck_ai_key";
+const AI_MODEL = "claude-opus-4-8";
+const getAiKey = () => { try { return (localStorage.getItem(AI_KEY_LS) || "").trim(); } catch (e) { return ""; } };
+const setAiKey = (v) => { try { v ? localStorage.setItem(AI_KEY_LS, v.trim()) : localStorage.removeItem(AI_KEY_LS); } catch (e) {} };
+
+const AI_OUTFIT_SCHEMA = {
+  type: "object",
+  properties: {
+    outfits: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          aesthetic: { type: "string" },
+          note: { type: "string" },
+          item_ids: { type: "array", items: { type: "string" } },
+        },
+        required: ["title", "aesthetic", "note", "item_ids"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["outfits"],
+  additionalProperties: false,
+};
+
+async function aiBuildOutfits(closet, opts){
+  opts = opts || {};
+  const key = opts.key || getAiKey();
+  if (!key) throw new Error("no key");
+  const items = closet.map((i) => ({ id: i.id, name: i.name, category: i.category, color: i.color }));
+  const w = opts.weather;
+  const baseTxt = opts.baseStyle === "Korean" ? "clean, trend-forward Korean-street polish" : "sun-washed, relaxed California ease";
+  const sys = "You are an expert fashion stylist for a Gen-Z / teen-girl audience. You compose outfits ONLY from the user's real wardrobe (the provided item ids), drawing on the kind of good-style outfits people post on Pinterest, Instagram and TikTok right now. The house aesthetic is " + baseTxt + " crossed with effortless, put-together styling. Be specific and trend-aware; never invent items that aren't in the wardrobe.";
+  const userMsg =
+    "Wardrobe (use only these item ids):\n" + JSON.stringify(items) +
+    "\n\nBase style: " + (opts.baseStyle || "Cali") +
+    "\nLiked aesthetics: " + ((opts.aesthetics && opts.aesthetics.length) ? opts.aesthetics.join(", ") : "open") +
+    "\nOccasion: " + (opts.occasion || "everyday") +
+    "\nWeather: " + (w && w.temp != null ? (w.temp + "°F, " + w.condition) : "unknown") +
+    "\n" + (opts.tryNew ? "Make 1–2 of the looks explore a fresh aesthetic; keep the rest on the preferred vibe." : "Keep every look on the user's preferred vibe.") +
+    "\n\nCompose up to 5 complete, wearable outfits. Each outfit must include a top + bottom OR a single dress, plus shoes and optional outerwear/accessories — all referenced by item id from the wardrobe above. Be weather-smart: include outerwear when it's cold, skip it when it's warm. For each outfit give a short trendy title, the single aesthetic it best matches, and a 2–3 sentence stylist note grounded in current social-media fashion that says how it fits the user's vibe, that aesthetic, the occasion, and the weather. Make the notes distinct from each other.";
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": key,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: opts.model || AI_MODEL,
+      max_tokens: 2000,
+      system: sys,
+      messages: [{ role: "user", content: userMsg }],
+      output_config: { format: { type: "json_schema", schema: AI_OUTFIT_SCHEMA } },
+    }),
+  });
+  if (!res.ok) { const t = await res.text().catch(() => ""); throw new Error("api " + res.status + " " + t.slice(0, 200)); }
+  const data = await res.json();
+  if (data.stop_reason === "refusal") throw new Error("refusal");
+  const block = (data.content || []).find((b) => b.type === "text");
+  if (!block) throw new Error("no text");
+  const parsed = JSON.parse(block.text);
+  const byId = new Map(closet.map((i) => [i.id, i]));
+  const basePhotos = opts.baseStyle === "Korean" ? KOREAN_PHOTOS : CALI_PHOTOS;
+  const out = [];
+  (parsed.outfits || []).forEach((o, idx) => {
+    const its = (o.item_ids || []).map((id) => byId.get(id)).filter(Boolean);
+    if (its.length < 2) return;
+    const key2 = its.map((i) => i.id).sort().join("-");
+    out.push({
+      id: "ai_" + key2,
+      title: o.title || OUTFIT_TITLES[idx % OUTFIT_TITLES.length],
+      aesthetic: (opts.baseStyle ? opts.baseStyle + " · " : "") + (o.aesthetic || "Everyday"),
+      img: basePhotos[idx % basePhotos.length],
+      note: o.note || "",
+      items: its.map((i) => ({ id: i.id, name: i.name, category: i.category, photo: i.photo })),
+      familiar: true,
+    });
+  });
+  if (!out.length) throw new Error("empty");
+  return out.slice(0, 5);
+}
+
 /* ---------- Outfit Engine (legacy demo templates, unused) ---------- */
 /* Real outfit photos (Unsplash, hotlink-friendly). Each falls back to a stylized figure if blocked. */
 const OUTFIT_TEMPLATES = [
@@ -802,20 +894,39 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather }) {
 
   const favIds = new Set(favorites.map((f) => f.id));
 
-  const generate = () => {
+  const [aiMode, setAiMode] = useState(false); // true when the last batch was AI-composed
+
+  const generate = async () => {
     setGenerating(true);
     setTried(true);
     setOutfits([]);
-    setTimeout(() => {
-      // Looks the user leans toward: favorited outfits' aesthetics + profile picks.
-      const favAesthetics = favorites.map((f) => f.aesthetic);
-      const likedAesthetics = new Set([...favAesthetics, ...(prefs?.aesthetics || [])]);
-      // Build real outfits from the actual closet items.
-      const built = buildOutfits(closet, likedAesthetics, favorites, { tryNew: !!prefs?.tryNew, baseStyle: prefs?.baseStyle, occasion: (custom.trim() || occasion), weather });
-      const picked = built.map((o, i) => ({ ...o, pastel: PASTELS[i % PASTELS.length] }));
-      setOutfits(picked);
+    setAiMode(false);
+    // Looks the user leans toward: favorited outfits' aesthetics + profile picks.
+    const favAesthetics = favorites.map((f) => f.aesthetic);
+    const likedAesthetics = new Set([...favAesthetics, ...(prefs?.aesthetics || [])]);
+    const occ = custom.trim() || occasion;
+    const finish = (built, ai) => {
+      setOutfits(built.map((o, i) => ({ ...o, pastel: PASTELS[i % PASTELS.length] })));
+      setAiMode(ai);
       setGenerating(false);
-    }, 600);
+    };
+    // If the user saved an API key, let Claude compose trend-aware outfits.
+    if (getAiKey()) {
+      try {
+        const ai = await aiBuildOutfits(closet, {
+          baseStyle: prefs?.baseStyle, aesthetics: [...likedAesthetics],
+          occasion: occ, weather, tryNew: !!prefs?.tryNew,
+        });
+        finish(ai, true);
+        return;
+      } catch (e) {
+        // fall through to the built-in engine
+      }
+    }
+    setTimeout(() => {
+      const built = buildOutfits(closet, likedAesthetics, favorites, { tryNew: !!prefs?.tryNew, baseStyle: prefs?.baseStyle, occasion: occ, weather });
+      finish(built, false);
+    }, 500);
   };
 
   return (
@@ -887,7 +998,14 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather }) {
       {/* Results */}
       {outfits.length > 0 && (
         <div className="mt-6 space-y-4">
-          <h2 className="text-lg font-black" style={{ color: "#5A5167" }}>Your {outfits.length} look{outfits.length !== 1 ? "s" : ""}</h2>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-lg font-black" style={{ color: "#5A5167" }}>Your {outfits.length} look{outfits.length !== 1 ? "s" : ""}</h2>
+            {aiMode && (
+              <span className="inline-flex items-center gap-1 text-[10.5px] font-extrabold px-2.5 py-1 rounded-full" style={{ background: "#EDE7FB", color: "#8E78C0" }}>
+                <Sparkles size={11} /> Styled by AI
+              </span>
+            )}
+          </div>
           {outfits.map((o, i) => (
             <div key={i} className="rounded-3xl p-4" style={{ background: o.pastel.bg }}>
               <OutfitCollage items={o.items} pastel={o.pastel} />
@@ -1775,6 +1893,11 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
   const toggle = (a) =>
     setAesthetics(aesthetics.includes(a) ? aesthetics.filter((x) => x !== a) : [...aesthetics, a]);
 
+  const [aiKeyInput, setAiKeyInput] = useState(getAiKey());
+  const [showKey, setShowKey] = useState(false);
+  const aiOn = !!aiKeyInput.trim();
+  const saveKey = (v) => { setAiKeyInput(v); setAiKey(v); };
+
   return (
     <div className="pb-28">
       <h1 className="text-[34px] leading-tight font-black mb-5" style={{ color: "#5A5167" }}>Profile</h1>
@@ -1857,6 +1980,43 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
           style={{ background: tryNew ? "#F3A7CB" : "#DDD0E6" }}>
           <div className="w-6 h-6 rounded-full bg-white shadow transition-all" style={{ transform: tryNew ? "translateX(24px)" : "translateX(0)" }} />
         </button>
+      </div>
+
+      {/* AI stylist */}
+      <label className="text-[19px] font-black tracking-wide block mt-8 flex items-center gap-2" style={{ color: "#6E6480" }}>
+        <Sparkles size={17} color="#8E78C0" /> AI Stylist
+      </label>
+      <p className="text-[13px] font-semibold mt-1 mb-3" style={{ color: "#B8AFC6" }}>
+        Add your own Anthropic API key to have outfits composed by AI with current social-media fashion sense. Without a key, the built-in stylist is used.
+      </p>
+      <div className="rounded-3xl p-4" style={{ background: "#F6EEF6" }}>
+        <div className="flex items-center gap-2">
+          <input
+            type={showKey ? "text" : "password"}
+            value={aiKeyInput}
+            onChange={(e) => saveKey(e.target.value)}
+            placeholder="sk-ant-…"
+            autoComplete="off" autoCorrect="off" spellCheck={false}
+            className="flex-1 rounded-2xl px-3.5 py-3 text-[13px] font-semibold outline-none"
+            style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#6E6480" }} />
+          <button onClick={() => setShowKey((s) => !s)}
+            className="px-3 py-3 rounded-2xl text-[12px] font-extrabold shrink-0"
+            style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#8A7FA0" }}>
+            {showKey ? "Hide" : "Show"}
+          </button>
+        </div>
+        <div className="flex items-center justify-between mt-2.5">
+          <div className="text-[12px] font-bold flex items-center gap-1.5" style={{ color: aiOn ? "#7BAE83" : "#A99FB5" }}>
+            <span className="w-2 h-2 rounded-full" style={{ background: aiOn ? "#7BAE83" : "#C6BCD2" }} />
+            {aiOn ? "AI stylist on" : "AI stylist off"}
+          </div>
+          {aiOn && (
+            <button onClick={() => saveKey("")} className="text-[12px] font-bold" style={{ color: "#C99BB5" }}>Remove key</button>
+          )}
+        </div>
+        <p className="text-[11.5px] font-semibold mt-2.5 leading-relaxed" style={{ color: "#B8AFC6" }}>
+          Your key is stored only in this browser and sent straight to Anthropic — never to us. Get one at console.anthropic.com (usage costs a few cents). Use a key with a low spend limit.
+        </p>
       </div>
 
       {/* favorited outfits */}
