@@ -37,7 +37,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   Sparkles, Search, Heart, Trash2, RotateCcw, Camera as CameraIcon,
-  Shirt, Plus, ChevronDown, Sun, Wind, X, Check, Footprints,
+  Shirt, Plus, ChevronDown, Sun, Wind, X, Check, Footprints, Star,
   ShoppingBag, Crown, Watch, Layers, WashingMachine, ArrowLeft, ArrowRight, Loader2, Cloud, User,
 } from "lucide-react";
 import { createRoot } from "react-dom/client";
@@ -212,11 +212,19 @@ async function refineLabels(items, onStage){
   try{
     const clf=await getClassifier(onStage);
     onStage&&onStage("Naming your pieces…");
+    const tmpls=["a photo of a {}","a close-up photo of a {}, a type of clothing"];
     for(const it of items){
       const cand=DETAIL_CANDIDATES[it.detLabel]; if(!cand) continue;
-      const out=await clf(it.photo, cand, { hypothesis_template:"a photo of a {}" });
-      if(out&&out[0]&&out[0].score>0.18){
-        const lbl=out[0].label;
+      const src=it.clfPhoto||it.photo;                 // flattened cutout when available
+      // Ensemble a couple of prompt templates and average — steadier on lookalikes
+      // like t-shirt vs polo than a single prompt.
+      const agg=new Map();
+      for(const t of tmpls){
+        const out=await clf(src, cand, { hypothesis_template:t });
+        for(const r of out) agg.set(r.label,(agg.get(r.label)||0)+r.score);
+      }
+      let lbl=null,sum=-1; for(const [l,s] of agg){ if(s>sum){ sum=s; lbl=l; } }
+      if(lbl && sum/tmpls.length>0.17){
         it.noun=titleCase(lbl); it.name=it.color+" "+it.noun;
         // Socks aren't a detector class — when the detail model reads a "shoes"
         // box as socks, file it under Accessories › Socks instead of Shoes.
@@ -276,17 +284,25 @@ async function cutoutItems(items, sc, W, H, onStage){
       ox.drawImage(sc, bx1,by1,cw,ch, 0,0,ow,oh);
       const idata=ox.getImageData(0,0,ow,oh); const px=idata.data;
       let nz=0,minx=ow,miny=oh,maxx=0,maxy=0;
+      const cbuckets=new Map();                          // dominant garment colour (opaque pixels only)
       for(let yy=0; yy<oh; yy++){
         const sy=by1+(yy/oh)*ch; const my=Math.min(mH-1,Math.round(sy*ps));
         for(let xx=0; xx<ow; xx++){
           const sx=bx1+(xx/ow)*cw; const mx=Math.min(mW-1,Math.round(sx*ps));
           let m=0; for(const L of layers){ const v=L[my*mW+mx]; if(v>m)m=v; }
           const a=m<90?0:(m>160?255:Math.round((m-90)/70*255));  // soft edge
-          const ai=(yy*ow+xx)*4+3; px[ai]=Math.round(px[ai]*(a/255));
-          if(a>30){ nz++; if(xx<minx)minx=xx; if(xx>maxx)maxx=xx; if(yy<miny)miny=yy; if(yy>maxy)maxy=yy; }
+          const o4=(yy*ow+xx)*4; px[o4+3]=Math.round(px[o4+3]*(a/255));
+          if(a>140){                                     // confidently-garment pixel
+            nz++; if(xx<minx)minx=xx; if(xx>maxx)maxx=xx; if(yy<miny)miny=yy; if(yy>maxy)maxy=yy;
+            const k=(px[o4]>>4)+"_"+(px[o4+1]>>4)+"_"+(px[o4+2]>>4);
+            const e=cbuckets.get(k)||[0,0,0,0]; e[0]+=px[o4];e[1]+=px[o4+1];e[2]+=px[o4+2];e[3]++; cbuckets.set(k,e);
+          }
         }
       }
       if(nz < ow*oh*0.02) continue;                      // too little matched → keep crop
+      // Re-name the colour from the clean garment pixels (no skin/background bleed).
+      let cb=null; for(const e of cbuckets.values()){ if(!cb||e[3]>cb[3]) cb=e; }
+      if(cb){ const col=classifyColor(cb[0]/cb[3],cb[1]/cb[3],cb[2]/cb[3]); if(col){ it.color=col; it.name=col+" "+it.noun; } }
       ox.putImageData(idata,0,0);
       const pad=Math.round(Math.max(ow,oh)*0.04);
       minx=Math.max(0,minx-pad); miny=Math.max(0,miny-pad); maxx=Math.min(ow-1,maxx+pad); maxy=Math.min(oh-1,maxy+pad);
@@ -294,6 +310,11 @@ async function cutoutItems(items, sc, W, H, onStage){
       const fc=document.createElement("canvas"); fc.width=fw; fc.height=fh;
       fc.getContext("2d").drawImage(oc, minx,miny,fw,fh, 0,0,fw,fh);
       it.photo=fc.toDataURL("image/png");
+      // A white-flattened copy for the detail classifier (CLIP ignores alpha, so a
+      // transparent PNG would still expose the original background underneath).
+      const wc=document.createElement("canvas"); wc.width=fw; wc.height=fh;
+      const wx=wc.getContext("2d"); wx.fillStyle="#fff"; wx.fillRect(0,0,fw,fh); wx.drawImage(fc,0,0);
+      it.clfPhoto=wc.toDataURL("image/jpeg",0.92);
     }
   }catch(e){ /* keep rectangular crops */ }
 }
@@ -458,10 +479,13 @@ async function detectGarments(dataUrl,onStage){
     items.push({name:color+" "+map.noun,category:map.category,subcategory:map.sub||null,color,noun:map.noun,detLabel:d.label,photo:crop.toDataURL("image/jpeg",0.9),bbox:[x1,y1,x2,y2],area:bw*bh});
   }
   items.sort((a,b)=>b.area-a.area);
-  await refineLabels(items,onStage);
+  // Cut out the garment FIRST (removes background + neighbouring clothes), THEN
+  // read colour and type from those clean pixels — far more accurate than the raw
+  // rectangular crop, which bleeds in skin, background and adjacent garments.
   await cutoutItems(items, sc, W, H, onStage);
+  await refineLabels(items,onStage);
   const annotated=items.length?annotatePhoto(img,W,H,items):null;
-  return {items:items.map(({area,bbox,detLabel,noun,...r})=>r),annotated};
+  return {items:items.map(({area,bbox,detLabel,noun,clfPhoto,...r})=>r),annotated};
 }
 
 async function downscaleDataUrl(dataUrl,max=1000){
@@ -566,13 +590,18 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
         outer=byCat("Outerwear"),acc=byCat("Accessories");
   if(closet.length<2||(tops.length===0&&bottoms.length===0))return [];
   const favItemIds=new Set((favorites||[]).flatMap(f=>(f.items||[]).map(it=>it.id)));
-  const rank=arr=>[...arr].sort((a,b)=>((favItemIds.has(b.id)?1:0)-(favItemIds.has(a.id)?1:0))||((b.fav?1:0)-(a.fav?1:0)));
+  // Learned preferences from past ratings / swipe-aways.
+  const fb=opts.feedback||{};
+  const aScore=a=>(fb.aesthetic&&fb.aesthetic[a])||0;
+  const iScore=id=>(fb.item&&fb.item[id])||0;
+  const rank=arr=>[...arr].sort((a,b)=>(iScore(b.id)-iScore(a.id))||((favItemIds.has(b.id)?1:0)-(favItemIds.has(a.id)?1:0))||((b.fav?1:0)-(a.fav?1:0)));
   const T=rank(tops),B=rank(bottoms);
 
-  // Aesthetic plan for the 5 looks.
-  const likedArr=[...likedAesthetics];
-  const preferred=likedArr.length?likedArr:["Minimalist","Clean Girl","Streetwear"];
-  const others=AESTHETICS.filter(a=>!likedAesthetics.has(a));
+  // Aesthetic plan for the 5 looks — drop strongly-disliked aesthetics and lead
+  // with the ones the user has rated highest.
+  const likedArr=[...likedAesthetics].filter(a=>aScore(a)>-3);
+  const preferred=(likedArr.length?likedArr:["Minimalist","Clean Girl","Streetwear"]).slice().sort((a,b)=>aScore(b)-aScore(a));
+  const others=AESTHETICS.filter(a=>!likedAesthetics.has(a)&&aScore(a)>-2).sort((a,b)=>aScore(b)-aScore(a));
   const plan=[];
   for(let i=0;i<5;i++){
     if(opts.tryNew && i>=3 && others.length){ plan.push({a:others[(i-3)%others.length],familiar:false}); }
@@ -627,6 +656,33 @@ const AI_MODEL = "claude-opus-4-8";
 const getAiKey = () => { try { return (localStorage.getItem(AI_KEY_LS) || "").trim(); } catch (e) { return ""; } };
 const setAiKey = (v) => { try { v ? localStorage.setItem(AI_KEY_LS, v.trim()) : localStorage.removeItem(AI_KEY_LS); } catch (e) {} };
 
+/* ---------- learning / persistence ----------
+   Outfit feedback (star ratings + swipe-aways) is accumulated into running scores
+   per aesthetic and per item, then fed back into outfit generation so looks get
+   more personalized over time. Everything is saved in the browser (localStorage).
+   STYLE_STARS+ ratings promote that look's aesthetic into the user's style. */
+const STATE_LS = "fitcheck_state_v1";
+const STYLE_STARS = 4;
+function emptyFeedback(){ return { ratings:{}, aesthetic:{}, item:{} }; }
+const bareAesthetic = (a) => { a = a || ""; const i = a.indexOf("· "); return (i >= 0 ? a.slice(i + 2) : a).trim(); };
+function loadState(){ try { return JSON.parse(localStorage.getItem(STATE_LS)) || null; } catch (e) { return null; } }
+function saveState(full){
+  try { localStorage.setItem(STATE_LS, JSON.stringify(full)); return true; }
+  catch (e) {
+    // Over quota (closet photos are large) — persist the wardrobe + learning
+    // without the heavy image data so personalization still survives a reload.
+    try {
+      const strip = (arr) => (arr || []).map(({ photo, ...r }) => r);
+      localStorage.setItem(STATE_LS, JSON.stringify({
+        ...full,
+        closet: strip(full.closet), trash: strip(full.trash),
+        favorites: (full.favorites || []).map((f) => ({ ...f, items: strip(f.items) })),
+      }));
+    } catch (e2) {}
+    return false;
+  }
+}
+
 const AI_OUTFIT_SCHEMA = {
   type: "object",
   properties: {
@@ -653,7 +709,17 @@ async function aiBuildOutfits(closet, opts){
   opts = opts || {};
   const key = opts.key || getAiKey();
   if (!key) throw new Error("no key");
-  const items = closet.map((i) => ({ id: i.id, name: i.name, category: i.category, color: i.color }));
+  const fb = opts.feedback || {};
+  const fbA = fb.aesthetic || {}, fbI = fb.item || {};
+  const loved = Object.keys(fbA).filter((k) => fbA[k] >= 2);
+  const disliked = Object.keys(fbA).filter((k) => fbA[k] <= -2);
+  const lovedItems = new Set(Object.keys(fbI).filter((k) => fbI[k] >= 1));
+  const avoidItems = new Set(Object.keys(fbI).filter((k) => fbI[k] <= -1));
+  const items = closet.map((i) => ({
+    id: i.id, name: i.name, category: i.category, color: i.color,
+    ...(lovedItems.has(i.id) ? { liked: true } : {}),
+    ...(avoidItems.has(i.id) ? { avoid: true } : {}),
+  }));
   const w = opts.weather;
   const baseTxt = opts.baseStyle === "Korean" ? "clean, trend-forward Korean-street polish" : "sun-washed, relaxed California ease";
   const sys = "You are an expert fashion stylist for a Gen-Z / teen-girl audience. You compose outfits ONLY from the user's real wardrobe (the provided item ids), drawing on the kind of good-style outfits people post on Pinterest, Instagram and TikTok right now. The house aesthetic is " + baseTxt + " crossed with effortless, put-together styling. Be specific and trend-aware; never invent items that aren't in the wardrobe.";
@@ -663,8 +729,10 @@ async function aiBuildOutfits(closet, opts){
     "\nLiked aesthetics: " + ((opts.aesthetics && opts.aesthetics.length) ? opts.aesthetics.join(", ") : "open") +
     "\nOccasion: " + (opts.occasion || "everyday") +
     "\nWeather: " + (w && w.temp != null ? (w.temp + "°F, " + w.condition) : "unknown") +
+    "\nAesthetics the user has rated highly (lean in): " + (loved.length ? loved.join(", ") : "none yet") +
+    "\nAesthetics the user disliked (avoid): " + (disliked.length ? disliked.join(", ") : "none") +
     "\n" + (opts.tryNew ? "Make 1–2 of the looks explore a fresh aesthetic; keep the rest on the preferred vibe." : "Keep every look on the user's preferred vibe.") +
-    "\n\nCompose up to 5 complete, wearable outfits. Each outfit must include a top + bottom OR a single dress, plus shoes and optional outerwear/accessories — all referenced by item id from the wardrobe above. Be weather-smart: include outerwear when it's cold, skip it when it's warm. For each outfit give a short trendy title, the single aesthetic it best matches, and a 2–3 sentence stylist note grounded in current social-media fashion that says how it fits the user's vibe, that aesthetic, the occasion, and the weather. Make the notes distinct from each other.";
+    "\n\nCompose up to 5 complete, wearable outfits. Each outfit must include a top + bottom OR a single dress, plus shoes and optional outerwear/accessories — all referenced by item id from the wardrobe above. Favor items flagged liked:true and de-emphasize items flagged avoid:true. Be weather-smart: include outerwear when it's cold, skip it when it's warm. For each outfit give a short trendy title, the single aesthetic it best matches, and a 2–3 sentence stylist note grounded in current social-media fashion that says how it fits the user's vibe, that aesthetic, the occasion, and the weather. Make the notes distinct from each other.";
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -975,17 +1043,123 @@ function OutfitCollage({ items, pastel }) {
   );
 }
 
-function StylistTab({ closet, favorites, toggleFav, prefs, weather }) {
+/* A generated-look card. Rate it 1–5★ (feeds personalization) or SWIPE it away
+   to dismiss it (a soft downvote). */
+function OutfitCard({ o, fav, rating, baseLabel, onFav, onRate, onDismiss }) {
+  const [open, setOpen] = useState(false);
+  const [dx, setDx] = useState(0);
+  const [gone, setGone] = useState(false);
+  const startX = useRef(null), cur = useRef(0), moved = useRef(false);
+  const DISMISS = 110;
+
+  const down = (e) => { startX.current = e.clientX; cur.current = 0; moved.current = false; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} };
+  const mv = (e) => {
+    if (startX.current == null) return;
+    const d = e.clientX - startX.current;
+    if (Math.abs(d) > 6) moved.current = true;
+    cur.current = d; setDx(d);
+  };
+  const up = () => {
+    if (startX.current == null) return; startX.current = null;
+    if (Math.abs(cur.current) > DISMISS) {
+      const dir = cur.current < 0 ? -1 : 1;
+      setGone(true); setDx(dir * 600);
+      setTimeout(() => onDismiss(o), 220);
+    } else { setDx(0); }
+  };
+  const dragging = startX.current != null;
+  const opacity = gone ? 0 : Math.max(0.4, 1 - Math.abs(dx) / 320);
+
+  return (
+    <div style={{ transform: `translateX(${dx}px)`, opacity, touchAction: "pan-y",
+      transition: dragging ? "none" : "transform .25s ease, opacity .25s ease" }}
+      onPointerDown={down} onPointerMove={mv} onPointerUp={up} onPointerCancel={up}>
+      <div className="rounded-3xl p-4 relative" style={{ background: o.pastel.bg }}>
+        {moved.current && Math.abs(dx) > 28 && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 text-[11px] font-extrabold px-3 py-1 rounded-full shadow-sm"
+            style={{ background: "#fff", color: o.pastel.text }}>
+            {Math.abs(dx) > DISMISS ? "Release to remove" : "Swipe further to remove"}
+          </div>
+        )}
+        <PersonGraphic pastel={o.pastel} img={o.img} />
+        <div className="text-[11px] font-bold mt-2 mb-2 flex items-center gap-1.5" style={{ color: o.pastel.text }}>
+          <User size={12} /> {baseLabel} vibe · your actual pieces below
+        </div>
+        <OutfitCollage items={o.items} pastel={o.pastel} />
+        <div className="flex items-center justify-between mt-3 gap-2">
+          <h3 className="text-[17px] font-black" style={{ color: o.pastel.text }}>{o.title}</h3>
+          <button onClick={() => onFav(o)}
+            className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0"
+            style={{ background: fav ? o.pastel.ring : "#ffffffcc" }}>
+            <Heart size={18} color={o.pastel.text} fill={fav ? o.pastel.text : "none"} />
+          </button>
+        </div>
+        <div className="mt-1.5">
+          <span className="inline-flex items-center gap-1 text-[11px] font-extrabold px-2.5 py-1 rounded-full" style={{ background: "#ffffffaa", color: o.pastel.text }}>
+            {o.familiar ? <><Heart size={11} /> For your vibe · {o.aesthetic}</> : <><Sparkles size={11} /> Try something new · {o.aesthetic}</>}
+          </span>
+        </div>
+
+        {/* rating */}
+        <div className="flex items-center gap-0.5 mt-3">
+          {[1, 2, 3, 4, 5].map((s) => (
+            <button key={s} onClick={(e) => { e.stopPropagation(); onRate(o, s); }}
+              className="active:scale-90 transition-transform p-0.5" aria-label={"rate " + s + " stars"}>
+              <Star size={22} color={o.pastel.text} fill={s <= rating ? o.pastel.text : "none"} />
+            </button>
+          ))}
+          <span className="text-[11px] font-bold ml-1.5" style={{ color: o.pastel.text }}>
+            {rating ? (rating >= STYLE_STARS ? "Loved — shapes your style" : "Thanks — learning your taste") : "Rate this look"}
+          </span>
+        </div>
+
+        {/* item list */}
+        <div className="mt-3 space-y-1.5">
+          {o.items.map((it, k) => (
+            <div key={k} className="flex items-center gap-2.5 px-3 py-2 rounded-2xl" style={{ background: "#ffffff99" }}>
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 overflow-hidden" style={{ background: o.pastel.ring }}>
+                {it.photo
+                  ? <img src={it.photo} alt="" className="w-full h-full object-contain" />
+                  : <CatIcon category={it.category} size={15} color={o.pastel.text} />}
+              </div>
+              <span className="text-[13px] font-extrabold" style={{ color: "#5A5167" }}>{it.name}</span>
+              <span className="ml-auto text-[11px] font-bold" style={{ color: o.pastel.text }}>{it.category}</span>
+            </div>
+          ))}
+        </div>
+
+        <button onClick={() => setOpen((v) => !v)}
+          className="mt-2 w-full flex items-center justify-between px-4 py-2.5 rounded-2xl text-[13px] font-extrabold"
+          style={{ background: "#ffffffaa", color: o.pastel.text }}>
+          Stylist Note
+          <ChevronDown size={16} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .25s" }} />
+        </button>
+        <div style={{ maxHeight: open ? 220 : 0, overflow: "hidden", transition: "max-height .35s ease" }}>
+          <p className="text-[13px] font-semibold leading-relaxed px-1 pt-3" style={{ color: o.pastel.text }}>{o.note}</p>
+        </div>
+
+        <div className="text-[10.5px] font-bold mt-3 text-center" style={{ color: o.pastel.text + "99" }}>
+          ◂ swipe this card away if it's not your vibe
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDismiss }) {
   const [occasion, setOccasion] = useState("");
   const [custom, setCustom] = useState("");
   const [outfits, setOutfits] = useState([]);
-  const [open, setOpen] = useState({});
   const [generating, setGenerating] = useState(false);
   const [tried, setTried] = useState(false);
+  const [ratings, setRatings] = useState(() => ({ ...(prefs?.feedback?.ratings || {}) }));
 
   const favIds = new Set(favorites.map((f) => f.id));
 
   const [aiMode, setAiMode] = useState(false); // true when the last batch was AI-composed
+
+  const handleRate = (o, s) => { setRatings((r) => ({ ...r, [o.id]: s })); onRate && onRate(o, s); };
+  const handleDismiss = (o) => { setOutfits((list) => list.filter((x) => x.id !== o.id)); onDismiss && onDismiss(o); };
 
   const generate = async () => {
     setGenerating(true);
@@ -1006,7 +1180,7 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather }) {
       try {
         const ai = await aiBuildOutfits(closet, {
           baseStyle: prefs?.baseStyle, aesthetics: [...likedAesthetics],
-          occasion: occ, weather, tryNew: !!prefs?.tryNew,
+          occasion: occ, weather, tryNew: !!prefs?.tryNew, feedback: prefs?.feedback,
         });
         finish(ai, true);
         return;
@@ -1015,7 +1189,7 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather }) {
       }
     }
     setTimeout(() => {
-      const built = buildOutfits(closet, likedAesthetics, favorites, { tryNew: !!prefs?.tryNew, baseStyle: prefs?.baseStyle, occasion: occ, weather });
+      const built = buildOutfits(closet, likedAesthetics, favorites, { tryNew: !!prefs?.tryNew, baseStyle: prefs?.baseStyle, occasion: occ, weather, feedback: prefs?.feedback });
       finish(built, false);
     }, 500);
   };
@@ -1097,54 +1271,10 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather }) {
               </span>
             )}
           </div>
-          {outfits.map((o, i) => (
-            <div key={i} className="rounded-3xl p-4" style={{ background: o.pastel.bg }}>
-              <PersonGraphic pastel={o.pastel} img={o.img} />
-              <div className="text-[11px] font-bold mt-2 mb-2 flex items-center gap-1.5" style={{ color: o.pastel.text }}>
-                <User size={12} /> {prefs?.baseStyle === "Korean" ? "Korean" : "Cali"} vibe · your actual pieces below
-              </div>
-              <OutfitCollage items={o.items} pastel={o.pastel} />
-              <div className="flex items-center justify-between mt-3 gap-2">
-                <h3 className="text-[17px] font-black" style={{ color: o.pastel.text }}>{o.title}</h3>
-                <button onClick={() => toggleFav(o)}
-                  className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0"
-                  style={{ background: favIds.has(o.id) ? o.pastel.ring : "#ffffffcc" }}>
-                  <Heart size={18} color={o.pastel.text} fill={favIds.has(o.id) ? o.pastel.text : "none"} />
-                </button>
-              </div>
-              <div className="mt-1.5">
-                <span className="inline-flex items-center gap-1 text-[11px] font-extrabold px-2.5 py-1 rounded-full" style={{ background: "#ffffffaa", color: o.pastel.text }}>
-                  {o.familiar ? <><Heart size={11} /> For your vibe · {o.aesthetic}</> : <><Sparkles size={11} /> Try something new · {o.aesthetic}</>}
-                </span>
-              </div>
-
-              {/* item list */}
-              <div className="mt-3 space-y-1.5">
-                {o.items.map((it, k) => (
-                  <div key={k} className="flex items-center gap-2.5 px-3 py-2 rounded-2xl" style={{ background: "#ffffff99" }}>
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 overflow-hidden" style={{ background: o.pastel.ring }}>
-                      {it.photo
-                        ? <img src={it.photo} alt="" className="w-full h-full object-contain" />
-                        : <CatIcon category={it.category} size={15} color={o.pastel.text} />}
-                    </div>
-                    <span className="text-[13px] font-extrabold" style={{ color: "#5A5167" }}>{it.name}</span>
-                    <span className="ml-auto text-[11px] font-bold" style={{ color: o.pastel.text }}>{it.category}</span>
-                  </div>
-                ))}
-              </div>
-
-              <button onClick={() => setOpen((s) => ({ ...s, [i]: !s[i] }))}
-                className="mt-2 w-full flex items-center justify-between px-4 py-2.5 rounded-2xl text-[13px] font-extrabold"
-                style={{ background: "#ffffffaa", color: o.pastel.text }}>
-                Stylist Note
-                <ChevronDown size={16} style={{ transform: open[i] ? "rotate(180deg)" : "none", transition: "transform .25s" }} />
-              </button>
-              <div style={{ maxHeight: open[i] ? 200 : 0, overflow: "hidden", transition: "max-height .35s ease" }}>
-                <p className="text-[13px] font-semibold leading-relaxed px-1 pt-3" style={{ color: o.pastel.text }}>
-                  {o.note}
-                </p>
-              </div>
-            </div>
+          {outfits.map((o) => (
+            <OutfitCard key={o.id} o={o} fav={favIds.has(o.id)} rating={ratings[o.id] || 0}
+              baseLabel={prefs?.baseStyle === "Korean" ? "Korean" : "Cali"}
+              onFav={toggleFav} onRate={handleRate} onDismiss={handleDismiss} />
           ))}
         </div>
       )}
@@ -2022,7 +2152,8 @@ function OnboardingCloset({ onBack, onFinish }) {
 }
 
 /* ================= PROFILE ================= */
-function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle }) {
+function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback }) {
+  const ratedCount = feedback && feedback.ratings ? Object.keys(feedback.ratings).length : 0;
   const toggle = (a) =>
     setAesthetics(aesthetics.includes(a) ? aesthetics.filter((x) => x !== a) : [...aesthetics, a]);
 
@@ -2050,7 +2181,11 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
 
       {/* aesthetics editor */}
       <label className="text-[19px] font-black tracking-wide block" style={{ color: "#6E6480" }}>My Aesthetics</label>
-      <p className="text-[13px] font-semibold mt-1 mb-3" style={{ color: "#B8AFC6" }}>Tap to add or remove — pick as many as you like.</p>
+      <p className="text-[13px] font-semibold mt-1 mb-1.5" style={{ color: "#B8AFC6" }}>Tap to add or remove — pick as many as you like.</p>
+      <p className="text-[12.5px] font-bold mb-3 flex items-center gap-1.5" style={{ color: "#A99FB5" }}>
+        <Star size={13} color="#C99BB5" fill="#C99BB5" />
+        Rate a look {STYLE_STARS}★ or higher in the Stylist and its aesthetic is added here automatically{ratedCount ? ` · ${ratedCount} look${ratedCount !== 1 ? "s" : ""} rated so far` : ""}.
+      </p>
       <div className="flex flex-wrap gap-2.5">
         {AESTHETICS.map((a, i) => {
           const on = aesthetics.includes(a);
@@ -2209,15 +2344,59 @@ function FavThumb({ img, pastel }) {
 
 /* ================= ROOT ================= */
 function App() {
-  const [onboarded, setOnboarded] = useState(false);
-  const [prefs, setPrefs] = useState({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false });
+  const [saved] = useState(loadState);   // prior session, if any
+  const [onboarded, setOnboarded] = useState(saved ? !!saved.onboarded : false);
+  const [prefs, setPrefs] = useState(saved?.prefs
+    ? { aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback(), ...saved.prefs }
+    : { aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback() });
   const [tab, setTab] = useState("stylist");
   const [pendingPhoto, setPendingPhoto] = useState(null); // onboarding photo to auto-scan
   const [weather, setWeather] = useState(null);
-  const [closet, setCloset] = useState(SEED);
-  const [trash, setTrash] = useState(SEED_TRASH);
-  const [favorites, setFavorites] = useState([]);
+  const [closet, setCloset] = useState(saved?.closet || SEED);
+  const [trash, setTrash] = useState(saved?.trash || SEED_TRASH);
+  const [favorites, setFavorites] = useState(saved?.favorites || []);
   const [toast, setToast] = useState("");
+
+  // Persist wardrobe + learning whenever they change.
+  useEffect(() => {
+    saveState({ onboarded, prefs, closet, trash, favorites });
+  }, [onboarded, prefs, closet, trash, favorites]);
+
+  // Record a star rating: update aesthetic + item scores, and promote the look's
+  // aesthetic into the user's style once it's rated STYLE_STARS or higher.
+  const rateOutfit = (outfit, stars) => {
+    const a = bareAesthetic(outfit.aesthetic);
+    const ids = (outfit.items || []).map((i) => i.id);
+    let promoted = false;
+    setPrefs((p) => {
+      const fb = p.feedback || emptyFeedback();
+      const prev = fb.ratings[outfit.id];
+      const w = (s) => s - 3;                 // 4–5 ⇒ positive, 1–2 ⇒ negative
+      const undo = prev ? w(prev) : 0;
+      const aesthetic = { ...fb.aesthetic }, item = { ...fb.item };
+      if (a) aesthetic[a] = (aesthetic[a] || 0) - undo + w(stars);
+      ids.forEach((id) => { item[id] = (item[id] || 0) - undo * 0.5 + w(stars) * 0.5; });
+      let aesthetics = p.aesthetics;
+      if (stars >= STYLE_STARS && a && AESTHETICS.includes(a) && !aesthetics.includes(a)) {
+        aesthetics = [...aesthetics, a]; promoted = true;
+      }
+      return { ...p, aesthetics, feedback: { ...fb, ratings: { ...fb.ratings, [outfit.id]: stars }, aesthetic, item } };
+    });
+    showToast(promoted ? `${a} added to your style ★` : "Thanks — learning your taste");
+  };
+
+  // Swipe-away = a soft downvote for that look's aesthetic + items.
+  const dismissOutfit = (outfit) => {
+    const a = bareAesthetic(outfit.aesthetic);
+    const ids = (outfit.items || []).map((i) => i.id);
+    setPrefs((p) => {
+      const fb = p.feedback || emptyFeedback();
+      const aesthetic = { ...fb.aesthetic }, item = { ...fb.item };
+      if (a) aesthetic[a] = (aesthetic[a] || 0) - 1;
+      ids.forEach((id) => { item[id] = (item[id] || 0) - 0.5; });
+      return { ...p, feedback: { ...fb, aesthetic, item } };
+    });
+  };
 
   const toggleFav = (outfit) => {
     setFavorites((prev) => {
@@ -2287,7 +2466,7 @@ function App() {
     <div style={{ fontFamily: "'Nunito', sans-serif", background: "linear-gradient(180deg,#FDF1F6,#F1F4FC)", minHeight: "100vh" }}>
       <div className="mx-auto relative" style={{ maxWidth: 430, minHeight: "100vh", background: "linear-gradient(180deg,#FFFCFE,#FBFAFF)" }}>
         <div className="px-5 pt-8">
-          {tab === "stylist" && <StylistTab closet={closet} favorites={favorites} toggleFav={toggleFav} prefs={prefs} weather={weather} />}
+          {tab === "stylist" && <StylistTab closet={closet} favorites={favorites} toggleFav={toggleFav} prefs={prefs} weather={weather} onRate={rateOutfit} onDismiss={dismissOutfit} />}
           {tab === "closet" && (
             <ClosetTab closet={closet} setCloset={setCloset} trash={trash} setTrash={setTrash} goCamera={() => setTab("camera")} />
           )}
@@ -2296,7 +2475,7 @@ function App() {
             <CameraTab onAdd={addItem} active={tab === "camera"} initialPhoto={pendingPhoto} onConsumeInitial={() => setPendingPhoto(null)} />
           </div>
           {tab === "profile" && (
-            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} />
+            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} />
           )}
         </div>
 
