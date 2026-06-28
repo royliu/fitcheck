@@ -194,6 +194,9 @@ const DETAIL_CANDIDATES = {
   bag:["shoulder bag","tote bag","crossbody bag","backpack","clutch","handbag","mini bag"],
   hat:["beanie","baseball cap","bucket hat","beret","wide-brim hat"],
 };
+/* Layering pieces that should live in Outerwear even when the detector boxed them
+   as a "top". */
+const OUTER_TYPES = new Set(["hoodie","sweatshirt","knit sweater","sweater","cardigan"]);
 let _clipMod=null,_clip=null;
 async function getClassifier(onStage){
   if(!_clipMod){ onStage&&onStage("Loading detail model…"); _clipMod=await import("@huggingface/transformers"); _clipMod.env.allowLocalModels=false; }
@@ -229,6 +232,8 @@ async function refineLabels(items, onStage){
         // Socks aren't a detector class — when the detail model reads a "shoes"
         // box as socks, file it under Accessories › Socks instead of Shoes.
         if(lbl==="socks"){ it.category="Accessories"; it.subcategory="Socks"; }
+        // Hoodies / sweaters / cardigans belong in Outerwear, not Tops.
+        if(OUTER_TYPES.has(lbl)){ it.category="Outerwear"; it.subcategory=null; }
       }
     }
   }catch(e){ /* keep coarse labels */ }
@@ -414,7 +419,7 @@ function annotatePhoto(img,W,H,items){
 }
 
 /* Detect garments in a photo. Returns {items:[{name,category,color,photo}], annotated}. */
-async function detectGarments(dataUrl,onStage){
+async function detectGarments(dataUrl,onStage,corrections){
   const session=await getDetector(onStage);
   onStage&&onStage("Finding your pieces…");
   const img=await loadImage(dataUrl);
@@ -484,8 +489,16 @@ async function detectGarments(dataUrl,onStage){
   // rectangular crop, which bleeds in skin, background and adjacent garments.
   await cutoutItems(items, sc, W, H, onStage);
   await refineLabels(items,onStage);
+  // Apply the user's own learned corrections (e.g. "this type is Outerwear, not
+  // Tops") so a fix they made once sticks on every future scan.
+  if(corrections){
+    for(const it of items){
+      const c=corrections[(it.noun||"").toLowerCase()];
+      if(c&&c.category){ it.category=c.category; it.subcategory=c.category==="Accessories"?(c.subcategory||null):null; }
+    }
+  }
   const annotated=items.length?annotatePhoto(img,W,H,items):null;
-  return {items:items.map(({area,bbox,detLabel,noun,clfPhoto,...r})=>r),annotated};
+  return {items:items.map(({area,bbox,detLabel,clfPhoto,...r})=>r),annotated};
 }
 
 async function downscaleDataUrl(dataUrl,max=1000){
@@ -663,7 +676,7 @@ const setAiKey = (v) => { try { v ? localStorage.setItem(AI_KEY_LS, v.trim()) : 
    STYLE_STARS+ ratings promote that look's aesthetic into the user's style. */
 const STATE_LS = "fitcheck_state_v1";
 const STYLE_STARS = 4;
-function emptyFeedback(){ return { ratings:{}, aesthetic:{}, item:{} }; }
+function emptyFeedback(){ return { ratings:{}, aesthetic:{}, item:{}, corrections:{} }; }
 const bareAesthetic = (a) => { a = a || ""; const i = a.indexOf("· "); return (i >= 0 ? a.slice(i + 2) : a).trim(); };
 function loadState(){ try { return JSON.parse(localStorage.getItem(STATE_LS)) || null; } catch (e) { return null; } }
 function saveState(full){
@@ -1100,17 +1113,21 @@ function OutfitCard({ o, fav, rating, baseLabel, onFav, onRate, onDismiss }) {
           </span>
         </div>
 
-        {/* rating */}
-        <div className="flex items-center gap-0.5 mt-3">
-          {[1, 2, 3, 4, 5].map((s) => (
-            <button key={s} onClick={(e) => { e.stopPropagation(); onRate(o, s); }}
-              className="active:scale-90 transition-transform p-0.5" aria-label={"rate " + s + " stars"}>
-              <Star size={22} color={o.pastel.text} fill={s <= rating ? o.pastel.text : "none"} />
-            </button>
-          ))}
-          <span className="text-[11px] font-bold ml-1.5" style={{ color: o.pastel.text }}>
-            {rating ? (rating >= STYLE_STARS ? "Loved — shapes your style" : "Thanks — learning your taste") : "Rate this look"}
-          </span>
+        {/* rating — teaches the app your taste */}
+        <div className="mt-3 rounded-2xl px-3.5 py-2.5" style={{ background: "#ffffffcc" }}>
+          <div className="text-[11.5px] font-extrabold mb-1.5" style={{ color: o.pastel.text }}>
+            {rating
+              ? (rating >= STYLE_STARS ? "★ Loved — added to your style" : "Thanks — personalizing your looks")
+              : "Rate this look to personalize your style"}
+          </div>
+          <div className="flex items-center gap-1.5">
+            {[1, 2, 3, 4, 5].map((s) => (
+              <button key={s} onClick={(e) => { e.stopPropagation(); onRate(o, s); }}
+                className="active:scale-90 transition-transform" aria-label={"rate " + s + " stars"}>
+                <Star size={28} color={o.pastel.text} fill={s <= rating ? o.pastel.text : "none"} strokeWidth={2.25} />
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* item list */}
@@ -1637,7 +1654,7 @@ function useCamera(active = true) {
   return { videoRef, canvasRef, camState, facing, startCamera, flipCamera, capture, stopStream };
 }
 
-function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial }) {
+function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections, onCorrect }) {
   const { videoRef, canvasRef, camState, facing, startCamera, flipCamera, capture } = useCamera(active);
   const fileRef = useRef(null);
   const [scanning, setScanning] = useState(false);
@@ -1648,12 +1665,20 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial }) {
   const [picker, setPicker] = useState(null); // index of the item whose category picker is open
   const [colorPicker, setColorPicker] = useState(null); // index of the item whose color picker is open
   const [loadPct, setLoadPct] = useState(0);
-  useEffect(() => onModelProgress(setLoadPct), []);
+  // The model loaders report progress per-FILE, so the raw number jumps backward
+  // between files. Clamp it to never decrease, and ignore sub-1% wiggle, so the
+  // bar climbs smoothly instead of flickering between numbers.
+  useEffect(() => onModelProgress((p) => setLoadPct((prev) => {
+    const next = Math.max(prev, p);
+    return Math.round(next * 100) === Math.round(prev * 100) ? prev : next;
+  })), []);
 
-  const setItemCategory = (i, category, subcategory) =>
-    setResults((rs) => rs.map((r, j) => j === i
-      ? { ...r, category, subcategory: category === "Accessories" ? (subcategory || r.subcategory || "Jewelry") : null }
-      : r));
+  const setItemCategory = (i, category, subcategory) => {
+    const sub = category === "Accessories" ? (subcategory || (results && results[i] && results[i].subcategory) || "Jewelry") : null;
+    setResults((rs) => rs.map((r, j) => j === i ? { ...r, category, subcategory: sub } : r));
+    const it = results && results[i];
+    if (it && onCorrect) onCorrect(it.noun || it.name, category, sub);   // teach this fix for next time
+  };
 
   // Add the current photo as an item the detector didn't find (jewelry, hairclips, …).
   const addManual = () => {
@@ -1681,7 +1706,7 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial }) {
     setStage("Getting ready…");
     try {
       const ds = await downscaleDataUrl(dataUrl, 1000);
-      const { items, annotated } = await detectGarments(ds, setStage);
+      const { items, annotated } = await detectGarments(ds, setStage, corrections);
       setResults(items);
       if (annotated) setPhoto(annotated); // show the labeled boxes over the photo
       if (!items.length) setError("No items found — make sure the WHOLE item is in the frame and step back a bit. A close-up of just part of an item won't be recognized.");
@@ -2385,6 +2410,17 @@ function App() {
     showToast(promoted ? `${a} added to your style ★` : "Thanks — learning your taste");
   };
 
+  // Remember a manual category fix (keyed by garment type) so the same correction
+  // is auto-applied to that type on every future scan.
+  const recordCorrection = (noun, category, subcategory) => {
+    const key = (noun || "").toLowerCase().trim();
+    if (!key) return;
+    setPrefs((p) => {
+      const fb = p.feedback || emptyFeedback();
+      return { ...p, feedback: { ...fb, corrections: { ...(fb.corrections || {}), [key]: { category, subcategory: subcategory || null } } } };
+    });
+  };
+
   // Swipe-away = a soft downvote for that look's aesthetic + items.
   const dismissOutfit = (outfit) => {
     const a = bareAesthetic(outfit.aesthetic);
@@ -2472,7 +2508,7 @@ function App() {
           )}
           {/* Camera stays mounted (just hidden) so a taken photo + AI loading aren't lost when you switch tabs. */}
           <div style={{ display: tab === "camera" ? "block" : "none" }}>
-            <CameraTab onAdd={addItem} active={tab === "camera"} initialPhoto={pendingPhoto} onConsumeInitial={() => setPendingPhoto(null)} />
+            <CameraTab onAdd={addItem} active={tab === "camera"} initialPhoto={pendingPhoto} onConsumeInitial={() => setPendingPhoto(null)} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection} />
           </div>
           {tab === "profile" && (
             <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} />
