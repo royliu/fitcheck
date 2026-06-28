@@ -702,29 +702,40 @@ const setAiKey = (v) => { try { v ? localStorage.setItem(AI_KEY_LS, v.trim()) : 
 /* ---------- learning / persistence ----------
    Outfit feedback (star ratings + swipe-aways) is accumulated into running scores
    per aesthetic and per item, then fed back into outfit generation so looks get
-   more personalized over time. Everything is saved in the browser (localStorage).
-   STYLE_STARS+ ratings promote that look's aesthetic into the user's style. */
-const STATE_LS = "fitcheck_state_v1";
+   more personalized over time. STYLE_STARS+ ratings promote that look's aesthetic
+   into the user's style.
+
+   Storage is IndexedDB, NOT localStorage: closet photos are far larger than the
+   ~5MB localStorage cap, which silently dropped them and left placeholder icons
+   after a reload. IndexedDB has a much larger quota and keeps the real photos. */
+const STATE_LS = "fitcheck_state_v1";   // legacy localStorage key (migration only)
+const STATE_KEY = "state";
 const STYLE_STARS = 4;
 function emptyFeedback(){ return { ratings:{}, aesthetic:{}, item:{}, corrections:{} }; }
 const bareAesthetic = (a) => { a = a || ""; const i = a.indexOf("· "); return (i >= 0 ? a.slice(i + 2) : a).trim(); };
-function loadState(){ try { return JSON.parse(localStorage.getItem(STATE_LS)) || null; } catch (e) { return null; } }
-function saveState(full){
-  try { localStorage.setItem(STATE_LS, JSON.stringify(full)); return true; }
-  catch (e) {
-    // Over quota (closet photos are large) — persist the wardrobe + learning
-    // without the heavy image data so personalization still survives a reload.
-    try {
-      const strip = (arr) => (arr || []).map(({ photo, ...r }) => r);
-      localStorage.setItem(STATE_LS, JSON.stringify({
-        ...full,
-        closet: strip(full.closet), trash: strip(full.trash),
-        favorites: (full.favorites || []).map((f) => ({ ...f, items: strip(f.items) })),
-      }));
-    } catch (e2) {}
-    return false;
-  }
+
+function idbOpen(){
+  return new Promise((res,rej)=>{
+    const r = indexedDB.open("fitcheck", 1);
+    r.onupgradeneeded = () => { try { r.result.createObjectStore("kv"); } catch (e) {} };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
 }
+async function idbGet(key){
+  try { const db = await idbOpen(); return await new Promise((res, rej) => {
+    const t = db.transaction("kv", "readonly").objectStore("kv").get(key);
+    t.onsuccess = () => res(t.result); t.onerror = () => rej(t.error);
+  }); } catch (e) { return null; }
+}
+async function idbSet(key, val){
+  try { const db = await idbOpen(); return await new Promise((res, rej) => {
+    const tx = db.transaction("kv", "readwrite"); tx.objectStore("kv").put(val, key);
+    tx.oncomplete = () => res(true); tx.onerror = () => rej(tx.error);
+  }); } catch (e) { return false; }
+}
+// One-time migration of any wardrobe saved by the older localStorage build.
+function loadLegacyState(){ try { return JSON.parse(localStorage.getItem(STATE_LS)) || null; } catch (e) { return null; } }
 
 const AI_OUTFIT_SCHEMA = {
   type: "object",
@@ -2397,23 +2408,44 @@ function FavThumb({ img, pastel }) {
 
 /* ================= ROOT ================= */
 function App() {
-  const [saved] = useState(loadState);   // prior session, if any
-  const [onboarded, setOnboarded] = useState(saved ? !!saved.onboarded : false);
-  const [prefs, setPrefs] = useState(saved?.prefs
-    ? { aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback(), ...saved.prefs }
-    : { aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback() });
+  const [hydrated, setHydrated] = useState(false);   // loaded saved state from IndexedDB yet?
+  const [onboarded, setOnboarded] = useState(false);
+  const [prefs, setPrefs] = useState({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback() });
   const [tab, setTab] = useState("stylist");
   const [pendingPhoto, setPendingPhoto] = useState(null); // onboarding photo to auto-scan
   const [weather, setWeather] = useState(null);
-  const [closet, setCloset] = useState(saved?.closet || SEED);
-  const [trash, setTrash] = useState(saved?.trash || SEED_TRASH);
-  const [favorites, setFavorites] = useState(saved?.favorites || []);
+  const [closet, setCloset] = useState(SEED);
+  const [trash, setTrash] = useState(SEED_TRASH);
+  const [favorites, setFavorites] = useState([]);
   const [toast, setToast] = useState("");
 
-  // Persist wardrobe + learning whenever they change.
+  // Load saved state from IndexedDB once (falling back to a one-time migration of
+  // the old localStorage build), then start persisting changes.
   useEffect(() => {
-    saveState({ onboarded, prefs, closet, trash, favorites });
-  }, [onboarded, prefs, closet, trash, favorites]);
+    (async () => {
+      let saved = await idbGet(STATE_KEY);
+      if (!saved) {
+        const legacy = loadLegacyState();
+        if (legacy) { saved = legacy; idbSet(STATE_KEY, legacy); try { localStorage.removeItem(STATE_LS); } catch (e) {} }
+      }
+      if (saved) {
+        setOnboarded(!!saved.onboarded);
+        if (saved.prefs) setPrefs({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback(), ...saved.prefs });
+        if (saved.closet) setCloset(saved.closet);
+        if (saved.trash) setTrash(saved.trash);
+        if (saved.favorites) setFavorites(saved.favorites);
+      }
+      setHydrated(true);
+    })();
+  }, []);
+
+  // Persist wardrobe + learning whenever they change (after the initial load, so
+  // we never overwrite saved data with the starting defaults).
+  useEffect(() => {
+    if (!hydrated) return;
+    const t = setTimeout(() => { idbSet(STATE_KEY, { onboarded, prefs, closet, trash, favorites }); }, 300);
+    return () => clearTimeout(t);
+  }, [hydrated, onboarded, prefs, closet, trash, favorites]);
 
   // Record a star rating: update aesthetic + item scores, and promote the look's
   // aesthetic into the user's style once it's rated STYLE_STARS or higher.
@@ -2521,6 +2553,16 @@ function App() {
     // If they snapped a closet photo, run it through detection right away.
     if (data.closetPhoto) { setPendingPhoto(data.closetPhoto); setTab("camera"); }
   };
+
+  if (!hydrated) {
+    // Brief splash while we load the saved wardrobe so we don't flash onboarding.
+    return (
+      <div style={{ fontFamily: "'Nunito', sans-serif", background: "linear-gradient(180deg,#FDF1F6,#F1F4FC)", minHeight: "100vh" }}
+        className="flex items-center justify-center">
+        <Loader2 size={34} className="animate-spin" color="#E891B5" />
+      </div>
+    );
+  }
 
   if (!onboarded) {
     return <Onboarding onDone={finishOnboarding} />;
