@@ -427,27 +427,33 @@ function sharpenCanvas(cx,w,h,k){
   }
   cx.putImageData(out,0,0);
 }
-/* "Studio-ish" garment photo: crop the box from the full-res source, upscale with
-   high-quality smoothing, give it a gentle tone + sharpen so it reads crisp and
-   clean rather than a dim phone snapshot. (Real detail can't be invented — this
-   polishes what the camera captured.) */
+/* "Studio-ish" garment photo: crop the box from the source, sized so the longest
+   side reaches CAP px (keeps big crops at full detail, gently upscales small ones),
+   with a light tone + sharpen so it reads crisp and clean. (Real detail can't be
+   invented — this preserves and polishes what the camera captured.) */
 function enhanceCrop(src,sx,sy,sw,sh){
-  const up=Math.min(2.4, Math.max(1, 680/Math.max(sw,sh)));
-  const w=Math.max(1,Math.round(sw*up)), h=Math.max(1,Math.round(sh*up));
+  const CAP=1000;
+  let scale=Math.min(CAP/Math.max(sw,sh), 2.2);      // shrink oversized crops to CAP, upscale tiny ones up to 2.2x
+  if(!isFinite(scale)||scale<=0) scale=1;
+  const w=Math.max(1,Math.round(sw*scale)), h=Math.max(1,Math.round(sh*scale));
   const c=document.createElement("canvas"); c.width=w; c.height=h;
   const cx=c.getContext("2d"); cx.imageSmoothingEnabled=true; cx.imageSmoothingQuality="high";
-  try{ cx.filter="saturate(1.08) contrast(1.05) brightness(1.02)"; }catch(_){}
+  try{ cx.filter="saturate(1.07) contrast(1.04) brightness(1.02)"; }catch(_){}
   cx.drawImage(src, sx,sy,sw,sh, 0,0,w,h);
-  try{ cx.filter="none"; sharpenCanvas(cx,w,h,0.18); }catch(_){}
+  try{ cx.filter="none"; sharpenCanvas(cx,w,h,0.16); }catch(_){}
   return c.toDataURL("image/jpeg",0.95);
 }
 
 /* Detect garments in a photo. Returns {items:[{name,category,color,photo}], annotated}. */
-async function detectGarments(dataUrl,onStage,corrections){
+async function detectGarments(dataUrl,onStage,corrections,fullUrl){
   const session=await getDetector(onStage);
   onStage&&onStage("Finding your pieces…");
   const img=await loadImage(dataUrl);
   const W=img.naturalWidth,H=img.naturalHeight;
+  // Detection + colour run on the fast downscaled copy, but the SHOWN crops are
+  // taken from the original full-resolution photo for maximum quality.
+  let fullImg=img, fs=1;
+  if(fullUrl && fullUrl!==dataUrl){ try{ fullImg=await loadImage(fullUrl); fs=fullImg.naturalWidth/W; }catch(e){ fullImg=img; fs=1; } }
 
   const {data,h,w}=preprocessForDetector(img);
   const input=new _ort.Tensor("float32",data,[1,3,h,w]);
@@ -505,7 +511,8 @@ async function detectGarments(dataUrl,onStage,corrections){
     }
     const dom=sampleDominant(sx, regions);
     const color=dom?classifyColor(dom[0],dom[1],dom[2]):"Neutral";
-    items.push({name:color+" "+map.noun,category:map.category,subcategory:map.sub||null,color,noun:map.noun,detLabel:d.label,photo:enhanceCrop(sc,x1,y1,bw,bh),bbox:[x1,y1,x2,y2],area:bw*bh});
+    const fx=Math.round(x1*fs),fy=Math.round(y1*fs),fbw=Math.max(1,Math.round(bw*fs)),fbh=Math.max(1,Math.round(bh*fs));
+    items.push({name:color+" "+map.noun,category:map.category,subcategory:map.sub||null,color,noun:map.noun,detLabel:d.label,photo:enhanceCrop(fullImg,fx,fy,fbw,fbh),bbox:[x1,y1,x2,y2],area:bw*bh});
   }
   items.sort((a,b)=>b.area-a.area);
   // Cut out the garment FIRST (removes background + neighbouring clothes), THEN
@@ -1777,7 +1784,7 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
     setStage("Getting ready…");
     try {
       const ds = await downscaleDataUrl(dataUrl, 1000);
-      const { items, annotated } = await detectGarments(ds, setStage, corrections);
+      const { items, annotated } = await detectGarments(ds, setStage, corrections, dataUrl);
       setResults(items);
       if (annotated) setPhoto(annotated); // show the labeled boxes over the photo
       if (!items.length) setError("No items found — make sure the WHOLE item is in the frame and step back a bit. A close-up of just part of an item won't be recognized.");
