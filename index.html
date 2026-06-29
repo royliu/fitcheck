@@ -617,6 +617,37 @@ function makeNote(items, ctx){
   return body + " " + vibe;
 }
 
+/* Per-aesthetic affinity model: which garment types + colours read as each
+   aesthetic. Used to bias the built-in stylist toward items that fit the user's
+   preferred aesthetics (it's heuristic — the AI stylist reasons about this far
+   more precisely). */
+const AESTHETIC_TRAITS = {
+  "Streetwear":       { types:[/hoodie|sweatshirt|cargo|sneaker|bomber|baseball cap|sweatpant|windbreaker|denim jacket|graphic/], colors:["Black","Gray","Charcoal","White","Olive","Navy"] },
+  "Minimalist":       { types:[/turtleneck|trouser|blazer|button-up|knit sweater|loafer|trench|slip dress|tank|midi/], colors:["Black","White","Gray","Beige","Cream","Tan","Navy"] },
+  "Coquette":         { types:[/mini skirt|pleated skirt|camisole|ballet flat|mary jane|blouse|mini dress|cardigan|bow|lace/], colors:["Pink","Light Pink","White","Cream","Mauve","Red"] },
+  "Clean Girl":       { types:[/tank|camisole|trouser|slip dress|blazer|loafer|turtleneck|midi|button-up/], colors:["White","Beige","Cream","Tan","Black","Gray","Brown"] },
+  "Dark Academia":    { types:[/blazer|trouser|button-up|turtleneck|loafer|wool coat|pleated skirt|knit sweater|trench|cardigan/], colors:["Brown","Black","Charcoal","Olive","Maroon","Beige","Navy","Cream"] },
+  "Grunge":           { types:[/leather jacket|denim jacket|ankle boot|boot|button-up|skinny jean|cargo|hoodie|graphic/], colors:["Black","Charcoal","Gray","Maroon","Olive","Dark Green"] },
+  "Soft Girl":        { types:[/cardigan|crop top|mini skirt|hoodie|sundress|mary jane|mom jean/], colors:["Pink","Light Pink","Light Blue","Purple","Cream","White"] },
+  "Cottagecore":      { types:[/midi dress|maxi dress|sundress|blouse|cardigan|wide-brim|ballet flat|pleated skirt|knit/], colors:["Cream","Beige","Green","Olive","Brown","White","Tan","Light Pink"] },
+  "Y2K":              { types:[/crop top|skinny jean|mini skirt|cargo|bomber|sneaker|bucket hat|camisole|baby tee/], colors:["Pink","Light Blue","Blue","Purple","Orange","Red"] },
+  "Romantic Feminine":{ types:[/blouse|midi dress|slip dress|maxi dress|heel|ballet flat|pleated skirt|camisole|lace/], colors:["Pink","Light Pink","Mauve","Cream","White","Red","Maroon"] },
+  "Boho":             { types:[/maxi dress|sundress|wide-leg|sandal|cardigan|wide-brim|denim|midi skirt/], colors:["Brown","Tan","Olive","Cream","Beige","Orange","Maroon"] },
+  "Angelcore":        { types:[/slip dress|maxi dress|camisole|ballet flat|blouse|midi dress|lace/], colors:["White","Cream","Light Pink","Light Blue","Beige"] },
+  "Baddie":           { types:[/bodycon|crop top|cargo|leather jacket|heel|mini skirt|sneaker|mules/], colors:["Black","Charcoal","Red","White","Brown"] },
+  "Hipster":          { types:[/button-up|beanie|denim jacket|cardigan|loafer|trouser|bucket hat/], colors:["Olive","Brown","Yellow","Teal","Charcoal","Navy"] },
+  "Indie":            { types:[/mom jean|cardigan|bucket hat|sneaker|button-up|trouser|graphic|beanie/], colors:["Yellow","Green","Orange","Brown","Teal","Purple"] },
+  "Kawaii":           { types:[/crop top|mini skirt|hoodie|mary jane|mini dress|cardigan|bow/], colors:["Pink","Light Pink","Light Blue","Purple","White","Yellow"] },
+};
+function aestheticAffinity(item, aesthetic){
+  const t = AESTHETIC_TRAITS[aesthetic]; if(!t) return 0;
+  const txt = ((item.noun||"")+" "+(item.name||"")).toLowerCase();
+  let s = 0;
+  if(t.types){ for(const re of t.types){ if(re.test(txt)){ s += 2; break; } } }
+  if(t.colors && item.color && t.colors.indexOf(item.color) >= 0) s += 1.5;
+  return s;
+}
+
 /* Compose up to 5 coherent outfits from real closet items.
    opts.tryNew: include 1-2 "try something new" looks; off = all on preferred vibe.
    opts.baseStyle: "Cali" | "Korean" — picks the model photo set + note flavor. */
@@ -631,8 +662,6 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
   const fb=opts.feedback||{};
   const aScore=a=>(fb.aesthetic&&fb.aesthetic[a])||0;
   const iScore=id=>(fb.item&&fb.item[id])||0;
-  const rank=arr=>[...arr].sort((a,b)=>(iScore(b.id)-iScore(a.id))||((favItemIds.has(b.id)?1:0)-(favItemIds.has(a.id)?1:0))||((b.fav?1:0)-(a.fav?1:0)));
-  const T=rank(tops),B=rank(bottoms);
 
   // Aesthetic plan for the 5 looks — drop strongly-disliked aesthetics and lead
   // with the ones the user has rated highest.
@@ -649,12 +678,17 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
   const wTemp = opts.weather && opts.weather.temp;
   const wantOuter = (wTemp==null) || wTemp <= 72;
 
+  // How well an item fits a slot for a given aesthetic. Aesthetic match dominates,
+  // then learned ratings + favorites.
+  const score=(it,aes)=> 2.4*aestheticAffinity(it,aes) + iScore(it.id) + (it.fav?0.6:0) + (favItemIds.has(it.id)?0.6:0);
+  const rankedFor=(arr,aes)=>[...arr].sort((a,b)=>score(b,aes)-score(a,aes));
+  const isDress=it=>!!it && /dress/i.test((it.noun||"")+" "+(it.name||""));
+  // Up to 2 accessories from DIFFERENT sub-categories (never two bags), best-match
+  // for the aesthetic first.
+  const pickAccs=(aes)=>{ const out=[],seen=new Set(); for(const it of rankedFor(acc,aes)){ const sub=it.subcategory||"Acc"; if(seen.has(sub))continue; seen.add(sub); out.push(it); if(out.length>=2)break; } return out; };
+
   const outfits=[],used=new Set();
-  const at=arr=>arr.length?arr:[null];
-  // Pick up to 2 accessories from DIFFERENT sub-categories so a look never gets,
-  // say, two bags.
-  const pickAcc=(k)=>{ const out=[],seen=new Set(); for(let a=0;a<acc.length&&out.length<2;a++){ const it=acc[(k+a)%acc.length]; const s=it.subcategory||"Acc"; if(seen.has(s))continue; seen.add(s); out.push(it); } return out; };
-  const push=set=>{
+  const push=(set,pe)=>{
     let items=set.filter(Boolean);
     // Never wear two of the same single-wear slot (two bags, two hats, two pairs
     // of shoes, etc.).
@@ -662,7 +696,6 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
     items=items.filter(it=>{ const slot=it.category==="Accessories"?("acc:"+(it.subcategory||"")):it.category; if(seenSlot.has(slot))return false; seenSlot.add(slot); return true; });
     if(items.length<2||outfits.length>=5)return;
     const key=items.map(i=>i.id).sort().join("-");if(used.has(key))return;used.add(key);
-    const pe=plan[outfits.length];
     outfits.push({
       id:"gen_"+key,
       title:OUTFIT_TITLES[outfits.length%OUTFIT_TITLES.length],
@@ -673,18 +706,17 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
       familiar:pe.familiar,
     });
   };
-  for(let ti=0;ti<at(T).length&&outfits.length<5;ti++){
-    for(let bi=0;bi<at(B).length&&outfits.length<5;bi++){
-      const k=ti+bi;
-      const set=[T[ti],B[bi],
-        shoes.length?shoes[k%shoes.length]:null,
-        (outer.length&&wantOuter)?outer[k%outer.length]:null,
-        ...pickAcc(k)];
-      push(set);
-    }
-  }
-  for(let ti=0;ti<T.length&&outfits.length<5;ti++){
-    push([T[ti],shoes[0]||null,(wantOuter?outer[0]:null)||null,...pickAcc(ti)]);
+
+  // Build one look per planned aesthetic, choosing the closet items that best match
+  // it. Rotate through each category's top few matches so the looks stay varied
+  // while still on-aesthetic; cycle extra rounds to fill up to five.
+  for(let i=0;i<14 && outfits.length<5;i++){
+    const pe=plan[i%plan.length], aes=pe.a;
+    const Ts=rankedFor(tops,aes), Bs=rankedFor(bottoms,aes), Ss=rankedFor(shoes,aes), Os=rankedFor(outer,aes);
+    const pick=(arr,n)=>arr.length?arr[i%Math.min(arr.length,n)]:null;
+    const top=pick(Ts,3);
+    const set=[top, isDress(top)?null:pick(Bs,3), pick(Ss,2), wantOuter?pick(Os,2):null, ...pickAccs(aes)];
+    push(set,pe);
   }
   return outfits.slice(0,5);
 }
