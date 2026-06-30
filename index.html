@@ -1449,8 +1449,8 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
   );
 }
 
-/* A closet item card you SWIPE left to reveal the trash button, then tap to delete. */
-function ClosetItemRow({ item, onTrash, onToggleWash, onToggleFav }) {
+/* A closet item card: TAP to open its detail view, SWIPE left to reveal delete. */
+function ClosetItemRow({ item, onTrash, onToggleWash, onToggleFav, onOpen }) {
   const REVEAL = 84;
   const [open, setOpen] = useState(false);
   const [drag, setDrag] = useState(null);   // live offset (px, negative) while dragging
@@ -1493,7 +1493,7 @@ function ClosetItemRow({ item, onTrash, onToggleWash, onToggleFav }) {
         style={{ background: "#fff", border: "1.5px solid #F1E6F1", touchAction: "pan-y",
           transform: `translateX(${tx}px)`, transition: drag == null ? "transform .22s cubic-bezier(.2,.8,.2,1)" : "none" }}
         onPointerDown={down} onPointerMove={mv} onPointerUp={up} onPointerCancel={up}
-        onClick={() => { if (!moved.current && open) setOpen(false); }}>
+        onClick={() => { if (moved.current) return; if (open) setOpen(false); else if (onOpen) onOpen(item); }}>
         <div className="rounded-2xl flex items-center justify-center shrink-0 overflow-hidden"
           style={{ width: 52, height: 52, background: p.bg }}>
           {item.photo
@@ -1517,12 +1517,92 @@ function ClosetItemRow({ item, onTrash, onToggleWash, onToggleFav }) {
   );
 }
 
+/* Focused detail window for a single closet piece — big image + editable name,
+   color and type (same controls as the post-photo item tag). */
+function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash }) {
+  if (!item) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "#00000066" }} onClick={onClose}>
+      <div className="w-full mx-auto flex flex-col rounded-3xl overflow-hidden"
+        style={{ maxWidth: 380, maxHeight: "90vh", background: "#fff", boxShadow: "0 20px 60px -10px #00000040" }}
+        onClick={(e) => e.stopPropagation()}>
+        {/* large image */}
+        <div className="relative shrink-0" style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
+          <div className="w-full flex items-center justify-center" style={{ height: 270 }}>
+            {item.photo
+              ? <img src={item.photo} alt={item.name} className="w-full h-full object-contain" />
+              : <CatIcon category={item.category} size={72} color="#C56B96" />}
+          </div>
+          <button onClick={onClose} className="absolute top-3 right-3 w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "#ffffffdd" }}>
+            <X size={18} color="#5A5167" />
+          </button>
+        </div>
+
+        {/* editable details */}
+        <div className="p-5 overflow-y-auto" style={{ minHeight: 0 }}>
+          <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#A99FB5" }}>Name</label>
+          <input value={item.name} onChange={(e) => onRename(item.id, e.target.value)}
+            className="w-full mt-1 mb-5 rounded-2xl px-4 py-3 text-[16px] font-extrabold outline-none"
+            style={{ background: "#FAF3FA", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
+
+          <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#A99FB5" }}>Color</label>
+          <div className="flex flex-wrap gap-2 mt-2 mb-5">
+            {COLOR_CHOICES.map(([name, hex]) => {
+              const on = item.color === name;
+              return (
+                <button key={name} onClick={() => onColor(item.id, name)}
+                  className="px-3 py-2 rounded-full text-[12px] font-extrabold flex items-center gap-1.5 active:scale-95 transition-all"
+                  style={{ background: on ? "#FDE9F1" : "#F4EEF5", color: on ? "#C56B96" : "#6E6480", outline: on ? "2px solid #F3A7CB" : "2px solid transparent" }}>
+                  <span className="inline-block w-3 h-3 rounded-full" style={{ background: hex, border: "1px solid #00000022" }} />{name}
+                </button>
+              );
+            })}
+          </div>
+
+          <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#A99FB5" }}>Type</label>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {CATEGORIES.map((c) => {
+              const on = item.category === c.key;
+              return (
+                <button key={c.key} onClick={() => onType(item.id, c.key, item.subcategory)}
+                  className="px-4 py-2 rounded-full text-[14px] font-extrabold active:scale-95 transition-all"
+                  style={{ background: on ? "#FDE9F1" : "#F4EEF5", color: on ? "#C56B96" : "#A99FB5" }}>{c.key}</button>
+              );
+            })}
+          </div>
+          {item.category === "Accessories" && (
+            <>
+              <div className="text-[11px] font-bold uppercase tracking-wide mt-3 mb-2" style={{ color: "#A99FB5" }}>Sub-category</div>
+              <div className="flex flex-wrap gap-2">
+                {ACCESSORY_SUBCATS.map((s) => {
+                  const on = item.subcategory === s.key;
+                  return (
+                    <button key={s.key} onClick={() => onType(item.id, "Accessories", s.key)}
+                      className="px-4 py-2 rounded-full text-[13px] font-extrabold active:scale-95 transition-all"
+                      style={{ background: on ? "#F1ECFB" : "#F4EEF5", color: on ? "#8E78C0" : "#A99FB5" }}>{s.key}</button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          <button onClick={onClose} className="w-full mt-6 py-3.5 rounded-2xl text-white font-black text-[15px]" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>Done</button>
+          <button onClick={() => { onTrash(item.id); onClose(); }} className="w-full mt-2 py-2.5 text-[13px] font-bold flex items-center justify-center gap-1.5" style={{ color: "#C99BB5" }}>
+            <Trash2 size={15} /> Move to trash
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
   const [activeCat, setActiveCat] = useState(null);
   const [activeSub, setActiveSub] = useState(null);
   const [inTrash, setInTrash] = useState(false);
   const [query, setQuery] = useState("");
   const [swiped, setSwiped] = useState(null);
+  const [detailId, setDetailId] = useState(null);   // closet item open in the detail window
 
   const counts = CATEGORIES.reduce((a, c) => {
     a[c.key] = closet.filter((i) => i.category === c.key).length; return a;
@@ -1545,6 +1625,16 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
     setCloset((c) => [{ ...item, fav: false, wash: false }, ...c]);
   };
   const purge = (id) => setTrash((t) => t.filter((i) => i.id !== id));
+  // Edits from the item detail window.
+  const renameItem = (id, name) => setCloset((c) => c.map((i) => i.id === id ? { ...i, name } : i));
+  const setItemColor = (id, color) => setCloset((c) => c.map((i) => i.id === id ? { ...i, color } : i));
+  const setItemType = (id, category, subcategory) => setCloset((c) => c.map((i) => i.id === id
+    ? { ...i, category, subcategory: category === "Accessories" ? (subcategory || i.subcategory || "Jewelry") : null } : i));
+  const detailItem = detailId ? closet.find((i) => i.id === detailId) : null;
+  const detailModal = (
+    <ClosetItemDetail item={detailItem} onClose={() => setDetailId(null)}
+      onRename={renameItem} onColor={setItemColor} onType={setItemType} onTrash={toTrash} />
+  );
 
   /* search across everything */
   const searching = query.trim().length > 0;
@@ -1653,7 +1743,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
               <p className="text-[13px] font-semibold mt-1" style={{ color: "#A99FB5" }}>Snap a piece below to add it here.</p>
             </div>
           ) : (
-            items.map((item) => <ClosetItemRow key={item.id} item={item} onTrash={toTrash} onToggleWash={toggleWash} onToggleFav={toggleFav} />)
+            items.map((item) => <ClosetItemRow key={item.id} item={item} onTrash={toTrash} onToggleWash={toggleWash} onToggleFav={toggleFav} onOpen={(it) => setDetailId(it.id)} />)
           )}
         </div>
         <button onClick={goCamera}
@@ -1661,6 +1751,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
           style={{ borderColor: "#E4D5E6", color: "#A99FB5", background: "#FAF3FA" }}>
           <Plus size={20} /> Add Item…
         </button>
+        {detailModal}
       </div>
     );
   }
@@ -1680,7 +1771,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
       {searching ? (
         <div className="space-y-3">
           <p className="text-[13px] font-bold" style={{ color: "#A99FB5" }}>{results.length} match{results.length !== 1 ? "es" : ""}</p>
-          {results.map((item) => <ClosetItemRow key={item.id} item={item} onTrash={toTrash} onToggleWash={toggleWash} onToggleFav={toggleFav} />)}
+          {results.map((item) => <ClosetItemRow key={item.id} item={item} onTrash={toTrash} onToggleWash={toggleWash} onToggleFav={toggleFav} onOpen={(it) => setDetailId(it.id)} />)}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3">
@@ -1711,6 +1802,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
           </button>
         </div>
       )}
+      {detailModal}
     </div>
   );
 }
