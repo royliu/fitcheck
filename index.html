@@ -1527,7 +1527,7 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash })
         style={{ maxWidth: 380, maxHeight: "90vh", background: "#fff", boxShadow: "0 20px 60px -10px #00000040" }}
         onClick={(e) => e.stopPropagation()}>
         {/* large image */}
-        <div className="relative shrink-0" style={{ background: "linear-gradient(160deg,#FFFFFF,#FAF4EC)" }}>
+        <div className="relative shrink-0" style={{ background: "#FFFFFF" }}>
           <div className="w-full flex items-center justify-center" style={{ height: 270 }}>
             {item.photo
               ? <img src={item.photo} alt={item.name} className="w-full h-full object-contain" />
@@ -1539,7 +1539,7 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash })
         </div>
 
         {/* editable details */}
-        <div className="p-5 overflow-y-auto" style={{ minHeight: 0, background: "#FBEFF6" }}>
+        <div className="p-5 overflow-y-auto" style={{ minHeight: 0, background: "#FCF8E6" }}>
           <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#A99FB5" }}>Name</label>
           <input value={item.name} onChange={(e) => onRename(item.id, e.target.value)}
             className="w-full mt-1 mb-5 rounded-2xl px-4 py-3 text-[16px] font-extrabold outline-none"
