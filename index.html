@@ -1527,7 +1527,7 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash })
         style={{ maxWidth: 380, maxHeight: "90vh", background: "#fff", boxShadow: "0 20px 60px -10px #00000040" }}
         onClick={(e) => e.stopPropagation()}>
         {/* large image */}
-        <div className="relative shrink-0" style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
+        <div className="relative shrink-0" style={{ background: "linear-gradient(160deg,#FFFFFF,#FAF4EC)" }}>
           <div className="w-full flex items-center justify-center" style={{ height: 270 }}>
             {item.photo
               ? <img src={item.photo} alt={item.name} className="w-full h-full object-contain" />
@@ -1539,11 +1539,11 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash })
         </div>
 
         {/* editable details */}
-        <div className="p-5 overflow-y-auto" style={{ minHeight: 0 }}>
+        <div className="p-5 overflow-y-auto" style={{ minHeight: 0, background: "#FBEFF6" }}>
           <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#A99FB5" }}>Name</label>
           <input value={item.name} onChange={(e) => onRename(item.id, e.target.value)}
             className="w-full mt-1 mb-5 rounded-2xl px-4 py-3 text-[16px] font-extrabold outline-none"
-            style={{ background: "#FAF3FA", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
+            style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
 
           <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#A99FB5" }}>Color</label>
           <div className="flex flex-wrap gap-2 mt-2 mb-5">
@@ -1552,7 +1552,7 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash })
               return (
                 <button key={name} onClick={() => onColor(item.id, name)}
                   className="px-3 py-2 rounded-full text-[12px] font-extrabold flex items-center gap-1.5 active:scale-95 transition-all"
-                  style={{ background: on ? "#FDE9F1" : "#F4EEF5", color: on ? "#C56B96" : "#6E6480", outline: on ? "2px solid #F3A7CB" : "2px solid transparent" }}>
+                  style={{ background: on ? "#FDE9F1" : "#fff", color: on ? "#C56B96" : "#6E6480", outline: on ? "2px solid #F3A7CB" : "2px solid transparent" }}>
                   <span className="inline-block w-3 h-3 rounded-full" style={{ background: hex, border: "1px solid #00000022" }} />{name}
                 </button>
               );
@@ -1566,7 +1566,7 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash })
               return (
                 <button key={c.key} onClick={() => onType(item.id, c.key, item.subcategory)}
                   className="px-4 py-2 rounded-full text-[14px] font-extrabold active:scale-95 transition-all"
-                  style={{ background: on ? "#FDE9F1" : "#F4EEF5", color: on ? "#C56B96" : "#A99FB5" }}>{c.key}</button>
+                  style={{ background: on ? "#FDE9F1" : "#fff", color: on ? "#C56B96" : "#A99FB5" }}>{c.key}</button>
               );
             })}
           </div>
@@ -1579,7 +1579,7 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash })
                   return (
                     <button key={s.key} onClick={() => onType(item.id, "Accessories", s.key)}
                       className="px-4 py-2 rounded-full text-[13px] font-extrabold active:scale-95 transition-all"
-                      style={{ background: on ? "#F1ECFB" : "#F4EEF5", color: on ? "#8E78C0" : "#A99FB5" }}>{s.key}</button>
+                      style={{ background: on ? "#F1ECFB" : "#fff", color: on ? "#8E78C0" : "#A99FB5" }}>{s.key}</button>
                   );
                 })}
               </div>
