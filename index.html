@@ -73,7 +73,7 @@ const ACCESSORY_SUBCATS = [
 ];
 
 const AESTHETICS = ["Streetwear","Minimalist","Coquette","Clean Girl","Dark Academia","Grunge","Soft Girl","Cottagecore","Y2K","Romantic Feminine","Boho","Angelcore","Baddie","Hipster","Indie","Kawaii"];
-const OCCASIONS = ["School Day","Business Meeting","Date Night","Casual Hangout","Party"];
+const OCCASIONS = ["School Day","Work / Office","Business Meeting","Job Interview","Casual Hangout","Brunch","Date Night","Dinner Out","Party","Birthday Party","Night Out","Concert / Festival","Wedding","Formal Event","Graduation","Church","Vacation","Beach Day","Gym / Workout","Travel Day"];
 
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
 
@@ -657,22 +657,43 @@ function aestheticAffinity(item, aesthetic){
 
 /* Occasion → what to lean into vs avoid. Keyword-matched so it works for both the
    dropdown options AND a free-typed occasion (e.g. "frat party" → party rules). */
+/* First matching rule wins, so the dressiest / most specific occasions come first. */
 const OCCASION_RULES = [
-  { match:/party|club|night ?out|birthday|celebrat|homecoming|prom|rave/i,
-    boost:[/dress|bodycon|mini skirt|skirt|heel|blouse|crop top|camisole|mules/], avoid:[/sweatpant|hoodie|cargo|legging|sneaker|gym|jeans|sundress|flannel|puffer/] },
-  { match:/business|work|office|meeting|interview|professional|conference/i,
-    boost:[/blazer|trouser|button-up|loafer|midi skirt|trench|knit sweater|heel|turtleneck/], avoid:[/hoodie|sweatpant|cargo|crop top|graphic|sneaker|short|bodycon|legging/] },
-  { match:/date|dinner|romantic|valentine/i,
-    boost:[/dress|blouse|skirt|heel|ballet flat|trouser|camisole|cardigan/], avoid:[/sweatpant|hoodie|cargo|gym|legging/] },
-  { match:/formal|wedding|gala|cocktail|graduation|ceremony|banquet/i,
-    boost:[/dress|maxi dress|midi dress|heel|blouse|trouser|blazer|mules/], avoid:[/jean|denim|sweat|hoodie|cargo|sneaker|short|legging|flannel/] },
+  // Formal — weddings, galas, graduations: dressy, no denim/sneakers/sweats
+  { match:/formal|wedding|gala|cocktail|ceremony|banquet|prom|black ?tie|graduation|gown/i,
+    boost:[/dress|maxi dress|midi dress|gown|heel|blouse|trouser|blazer|mules|pumps/], avoid:[/jean|denim|sweat|hoodie|cargo|sneaker|short|legging|flannel|tank|gym/] },
+  // Party / night out — birthdays, clubs, dances: dressy, lean skirts/dresses/heels
+  { match:/party|club|night ?out|birthday|homecoming|dance|new ?year|nye|going out/i,
+    boost:[/dress|bodycon|mini skirt|skirt|heel|blouse|crop top|camisole|mules/], avoid:[/sweatpant|hoodie|cargo|legging|sneaker|gym|jean|sundress|flannel|puffer/] },
+  // Date / dinner — romantic, polished
+  { match:/date|dinner|romantic|valentine|anniversary/i,
+    boost:[/dress|blouse|skirt|heel|ballet flat|trouser|camisole|cardigan/], avoid:[/sweatpant|hoodie|cargo|gym|legging|flannel/] },
+  // Business / professional — work, interviews, meetings
+  { match:/business|work|office|meeting|interview|professional|conference|presentation/i,
+    boost:[/blazer|trouser|button-up|loafer|midi skirt|trench|knit sweater|heel|turtleneck|pumps/], avoid:[/hoodie|sweatpant|cargo|crop top|graphic|sneaker|short|bodycon|legging/] },
+  // Concert / festival — trendy and edgy; casual stays fine
+  { match:/concert|festival|show|gig|rave|bar\b/i,
+    boost:[/boot|leather jacket|denim jacket|graphic|crop top|cargo|bomber|skirt|sneaker/], avoid:[/blazer|trouser|loafer|pumps|trench/] },
+  // Church / worship — modest, smart
+  { match:/church|worship|service|temple|mass|mosque/i,
+    boost:[/dress|midi dress|blouse|skirt|cardigan|trouser|ballet flat|loafer/], avoid:[/crop top|bodycon|sweatpant|gym|legging|cargo|tank/] },
+  // Smart-casual social — brunch, coffee, family/holiday gatherings, photos
+  { match:/brunch|lunch|coffee|cafe|gathering|holiday|family|reunion|shower|photo|picnic/i,
+    boost:[/blouse|sundress|midi dress|jean|cardigan|skirt|loafer|ballet flat|sweater/], avoid:[/sweatpant|gym|hoodie/] },
+  // School / class
   { match:/school|class|college|campus|lecture|study/i,
-    boost:[/jean|sweater|hoodie|sneaker|cardigan|t-shirt|tee|trouser|cargo/], avoid:[/heel|bodycon|gown|sequin/] },
-  { match:/casual|hangout|errand|weekend|coffee|brunch|chill|mall|shopping|hang out/i,
+    boost:[/jean|sweater|hoodie|sneaker|cardigan|t-shirt|tee|trouser|cargo|skirt/], avoid:[/heel|bodycon|gown|sequin/] },
+  // Everyday casual — hangouts, errands, shopping
+  { match:/casual|hangout|hang out|errand|weekend|chill|mall|shopping|day out|stroll/i,
     boost:[/jean|t-shirt|tee|sneaker|sweater|cardigan|hoodie|short|sundress/], avoid:[/heel|bodycon|gown|blazer/] },
-  { match:/gym|workout|exercise|run|yoga|sport|hike/i,
+  // Travel — comfort first
+  { match:/travel|flight|airport|road ?trip|commute|plane/i,
+    boost:[/legging|sweatpant|hoodie|sneaker|jean|sweater|cardigan|tank/], avoid:[/heel|bodycon|gown|blazer|trouser/] },
+  // Gym / active
+  { match:/gym|workout|exercise|run|yoga|sport|hike|pilates|fitness/i,
     boost:[/legging|sweatpant|sneaker|tank|short|hoodie/], avoid:[/dress|heel|blouse|skirt|loafer|trouser|coat|boot/] },
-  { match:/beach|pool|vacation|resort|tropical/i,
+  // Beach / vacation
+  { match:/beach|pool|vacation|resort|tropical|cruise|summer/i,
     boost:[/sundress|short|sandal|tank|maxi dress|camisole/], avoid:[/coat|wool|blazer|boot|heel|sweater|puffer|trench/] },
 ];
 function occasionAffinity(item, occText){
