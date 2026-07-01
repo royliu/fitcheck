@@ -693,10 +693,10 @@ const OCCASION_RULES = [
     boost:[/legging|sweatpant|hoodie|sneaker|jean|sweater|cardigan|tank/], avoid:[/heel|bodycon|gown|blazer|trouser/] },
   // Gym / active
   { match:/gym|workout|exercise|run|yoga|sport|hike|pilates|fitness/i,
-    boost:[/legging|sweatpant|sneaker|tank|short|hoodie/], avoid:[/dress|heel|blouse|skirt|loafer|trouser|coat|boot/] },
+    boost:[/legging|sweatpant|sneaker|tank|short|hoodie/], avoid:[/dress|heel|blouse|skirt|loafer|trouser|coat|boot|jean|blazer|cardigan|sundress|mary jane|mules|sandal/] },
   // Beach / vacation
   { match:/beach|pool|vacation|resort|tropical|cruise|summer/i,
-    boost:[/sundress|short|sandal|tank|maxi dress|camisole/], avoid:[/coat|wool|blazer|boot|heel|sweater|puffer|trench/] },
+    boost:[/sundress|short|sandal|tank|maxi dress|camisole/], avoid:[/coat|wool|blazer|boot|heel|sweater|puffer|trench|sneaker|mary jane|loafer|ballet flat|mules|jean/] },
 ];
 function occasionAffinity(item, occText){
   if(!occText) return 0;
@@ -744,9 +744,35 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
   const score=(it,aes)=> 2.4*aestheticAffinity(it,aes) + occasionAffinity(it,opts.occasion) + iScore(it.id) + (it.fav?0.6:0) + (favItemIds.has(it.id)?0.6:0);
   const rankedFor=(arr,aes)=>[...arr].sort((a,b)=>score(b,aes)-score(a,aes));
   const isDress=it=>!!it && /dress/i.test((it.noun||"")+" "+(it.name||""));
-  // Up to 2 accessories from DIFFERENT sub-categories (never two bags), best-match
-  // for the aesthetic first.
-  const pickAccs=(aes)=>{ const out=[],seen=new Set(); for(const it of rankedFor(acc,aes)){ const sub=it.subcategory||"Acc"; if(seen.has(sub))continue; seen.add(sub); out.push(it); if(out.length>=2)break; } return out; };
+  // Up to 2 accessories from DIFFERENT sub-categories (never two bags). The
+  // sub-categories chosen stay whichever best match the aesthetic, but WHICH
+  // item within a sub-category (e.g. which of 3 bags) rotates with `i` so
+  // owning several bags/necklaces/etc. actually gets used across looks.
+  const accGroups = (() => {
+    const g = new Map();
+    for (const it of acc) { const sub = it.subcategory || "Acc"; if (!g.has(sub)) g.set(sub, []); g.get(sub).push(it); }
+    return [...g.entries()];
+  })();
+  // `slotIdx` is which OUTPUT LOOK this is (0,1,2,3,4 — not the attempt counter),
+  // so across exactly 5 looks it's guaranteed to visit every residue mod pool
+  // size. The within-subcategory item order is intentionally aesthetic-INDEPENDENT
+  // (favorites/ratings only) — if it were re-ranked per aesthetic like tops/bottoms,
+  // an aesthetic-driven reshuffle could "hide" an item behind the same residue on
+  // every visit (e.g. 3 bags, 5 looks, one aesthetic reorders them right when the
+  // rotation would have reached the 3rd) and it would never get picked.
+  const pickAccs=(aes,slotIdx)=>{
+    const groups = accGroups.map(([sub, items]) => {
+      const ok = items.filter(it => occasionAffinity(it, opts.occasion) >= 0);
+      const cand = ok.length ? ok : items;
+      const stable = [...cand].sort((a, b) =>
+        (iScore(b.id) + (b.fav?0.6:0) + (favItemIds.has(b.id)?0.6:0)) -
+        (iScore(a.id) + (a.fav?0.6:0) + (favItemIds.has(a.id)?0.6:0)));
+      return { sub, stable, aesBest: score(rankedFor(cand, aes)[0], aes) };
+    }).sort((a, b) => b.aesBest - a.aesBest);   // which sub-categories lead is still aesthetic-aware
+    const out = [];
+    for (const g of groups) { if (out.length >= 2) break; out.push(g.stable[slotIdx % g.stable.length]); }
+    return out;
+  };
 
   const outfits=[],used=new Set();
   const push=(set,pe)=>{
@@ -769,24 +795,24 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
   };
 
   // Build one look per planned aesthetic, choosing the closet items that best match
-  // it. For variety we rotate — but ONLY among items close to the best score, so a
-  // clearly-wrong piece (jeans for a party) never surfaces when a better option
-  // exists. Cycle extra rounds to fill up to five.
-  for(let i=0;i<14 && outfits.length<5;i++){
+  // it. Occasion-inappropriate pieces (jeans/sneakers for a party, sweatpants for
+  // the beach, etc.) are dropped entirely as long as the category still has a
+  // suitable option left — that's the correctness gate. Within what's left, we
+  // rotate through a generous pool (not just the single best) so every piece the
+  // user owns actually gets a turn, and keep cycling extra rounds to reach five.
+  for(let i=0;i<24 && outfits.length<5;i++){
     const pe=plan[i%plan.length], aes=pe.a;
     const pick=(arr,n)=>{
       if(!arr.length) return null;
-      // Drop occasion-inappropriate pieces (jeans/sneakers for a party, etc.) as long
-      // as the category still has a suitable option left.
       const ok=arr.filter(it=>occasionAffinity(it,opts.occasion)>=0);
       const cand=ok.length?ok:arr;
       const ranked=rankedFor(cand,aes);
-      const best=score(ranked[0],aes);
-      const pool=ranked.filter(it=>score(it,aes)>=best-1.6).slice(0,n);   // vary only among near-best
+      const pool=ranked.slice(0,Math.min(n,ranked.length));
       return pool[i%pool.length];
     };
-    const top=pick(tops,3);
-    const set=[top, isDress(top)?null:pick(bottoms,3), pick(shoes,2), wantOuter?pick(outer,2):null, ...pickAccs(aes)];
+    const top=pick(tops,4);
+    const slotIdx=outfits.length;   // which output look this attempt would become
+    const set=[top, isDress(top)?null:pick(bottoms,4), pick(shoes,3), wantOuter?pick(outer,2):null, ...pickAccs(aes,slotIdx)];
     push(set,pe);
   }
   return outfits.slice(0,5);
