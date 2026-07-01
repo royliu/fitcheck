@@ -1430,13 +1430,15 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
 
       <h1 className="text-[34px] leading-tight font-black mt-10 mb-2" style={{ color: "#5A5167" }}>Outfit ideas, just a click away</h1>
 
-      {/* daily generation usage */}
-      <button onClick={goProfile}
-        className="inline-flex items-center gap-1.5 text-[11.5px] font-extrabold px-3 py-1.5 rounded-full mb-4 active:scale-95 transition-transform"
-        style={{ background: remaining <= 0 ? "#FCEDE6" : "#F1ECFB", color: remaining <= 0 ? "#CC8567" : "#8E78C0" }}>
-        <Zap size={12} />
-        {dailyLimit === Infinity ? "Unlimited generations" : `${remaining} generation${remaining === 1 ? "" : "s"} left today`}
-      </button>
+      {/* daily generation usage — own line, above Occasion */}
+      <div className="mb-4">
+        <button onClick={goProfile}
+          className="inline-flex items-center gap-1.5 text-[11.5px] font-extrabold px-3 py-1.5 rounded-full active:scale-95 transition-transform"
+          style={{ background: remaining <= 0 ? "#FCEDE6" : "#F1ECFB", color: remaining <= 0 ? "#CC8567" : "#8E78C0" }}>
+          <Zap size={12} />
+          {dailyLimit === Infinity ? "Unlimited generations" : `${remaining} generation${remaining === 1 ? "" : "s"} left today`}
+        </button>
+      </div>
 
       {/* Occasion */}
       <label className="text-xs font-bold uppercase tracking-wide" style={{ color: "#A99FB5" }}>Occasion</label>
