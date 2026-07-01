@@ -39,6 +39,7 @@ import {
   Sparkles, Search, Heart, Trash2, RotateCcw, Camera as CameraIcon,
   Shirt, Plus, ChevronDown, Sun, Wind, X, Check, Footprints, Star,
   ShoppingBag, Crown, Watch, Layers, WashingMachine, ArrowLeft, ArrowRight, Loader2, Cloud, User,
+  Zap, Lock, Gift, Share2,
 } from "lucide-react";
 import { createRoot } from "react-dom/client";
 
@@ -849,6 +850,40 @@ const STYLE_STARS = 4;
 function emptyFeedback(){ return { ratings:{}, aesthetic:{}, item:{}, corrections:{} }; }
 const bareAesthetic = (a) => { a = a || ""; const i = a.indexOf("· "); return (i >= 0 ? a.slice(i + 2) : a).trim(); };
 
+/* ---------- plans & daily generation limit ----------
+   IMPORTANT: this is a single static HTML file with no backend, database, or
+   payment processor — there is nowhere to run real billing or verify shares.
+   "Plans" below are a LOCAL, device-only demo: picking one instantly changes
+   your daily limit here for design/testing purposes. No payment is collected
+   anywhere. Shipping this for real users would mean wiring a real payment
+   provider + server first. Usage/plan are stored in prefs (same IndexedDB as
+   everything else), so they DO persist across reloads on this device/browser
+   — but a user can reset them by clearing site data, since nothing server-side
+   enforces the cap. */
+const PLANS = [
+  { key:"free", label:"Free",      price:"$0",     period:"",    limit:20,       blurb:"20 outfit generations a day" },
+  { key:"plus", label:"Plus",      price:"$4.99",  period:"/mo", limit:25,       blurb:"25 generations a day" },
+  { key:"pro",  label:"Pro",       price:"$9.99",  period:"/mo", limit:45,       blurb:"45 generations a day" },
+  { key:"max",  label:"Unlimited", price:"$19.99", period:"/mo", limit:Infinity, blurb:"Unlimited generations, every day" },
+];
+const SHARE_BONUS = 5;                 // bonus generations granted per share
+const MAX_SHARE_BONUSES_PER_DAY = 4;   // caps stacking from repeated taps (20/day max)
+const planByKey = (key) => PLANS.find((p) => p.key === key) || PLANS[0];
+/* Local calendar date (not UTC) — "today" should match the user's own day. */
+function todayKey(){ const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); }
+function getUsage(prefs){
+  const u = prefs && prefs.usage;
+  const today = todayKey();
+  if (!u || u.date !== today) return { date: today, count: 0, shareBonuses: 0 };  // rolls over at midnight
+  return u;
+}
+function generationsRemaining(prefs){
+  const plan = planByKey((prefs && prefs.plan) || "free");
+  if (plan.limit === Infinity) return Infinity;
+  const u = getUsage(prefs);
+  return Math.max(0, plan.limit + u.shareBonuses * SHARE_BONUS - u.count);
+}
+
 function idbOpen(){
   return new Promise((res,rej)=>{
     const r = indexedDB.open("fitcheck", 1);
@@ -1337,7 +1372,7 @@ function OutfitCard({ o, fav, rating, baseLabel, onFav, onRate, onDismiss }) {
   );
 }
 
-function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDismiss }) {
+function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDismiss, onUseGeneration, goProfile }) {
   const [occasion, setOccasion] = useState("");
   const [custom, setCustom] = useState("");
   const [outfits, setOutfits] = useState([]);
@@ -1346,6 +1381,8 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
   const [ratings, setRatings] = useState(() => ({ ...(prefs?.feedback?.ratings || {}) }));
 
   const favIds = new Set(favorites.map((f) => f.id));
+  const remaining = generationsRemaining(prefs);
+  const dailyLimit = planByKey(prefs?.plan || "free").limit;
 
   const [aiMode, setAiMode] = useState(false); // true when the last batch was AI-composed
 
@@ -1353,6 +1390,8 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
   const handleDismiss = (o) => { setOutfits((list) => list.filter((x) => x.id !== o.id)); onDismiss && onDismiss(o); };
 
   const generate = async () => {
+    if (remaining <= 0) { goProfile && goProfile(); return; }   // guard — FAB already prevents this in the normal flow
+    onUseGeneration && onUseGeneration();
     setGenerating(true);
     setTried(true);
     setOutfits([]);
@@ -1389,7 +1428,15 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
     <div className="pb-40">
       <WeatherBar weather={weather} />
 
-      <h1 className="text-[34px] leading-tight font-black mt-10 mb-6" style={{ color: "#5A5167" }}>Outfit ideas, just a click away</h1>
+      <h1 className="text-[34px] leading-tight font-black mt-10 mb-2" style={{ color: "#5A5167" }}>Outfit ideas, just a click away</h1>
+
+      {/* daily generation usage */}
+      <button onClick={goProfile}
+        className="inline-flex items-center gap-1.5 text-[11.5px] font-extrabold px-3 py-1.5 rounded-full mb-4 active:scale-95 transition-transform"
+        style={{ background: remaining <= 0 ? "#FCEDE6" : "#F1ECFB", color: remaining <= 0 ? "#CC8567" : "#8E78C0" }}>
+        <Zap size={12} />
+        {dailyLimit === Infinity ? "Unlimited generations" : `${remaining} generation${remaining === 1 ? "" : "s"} left today`}
+      </button>
 
       {/* Occasion */}
       <label className="text-xs font-bold uppercase tracking-wide" style={{ color: "#A99FB5" }}>Occasion</label>
@@ -1472,12 +1519,20 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
 
       {/* FAB */}
       <div className="fixed left-0 right-0 flex justify-center pointer-events-none" style={{ bottom: 92, maxWidth: 430, margin: "0 auto" }}>
-        <button onClick={generate} disabled={generating}
-          className="pointer-events-auto flex items-center gap-2 px-7 py-4 rounded-full font-black text-white text-[16px] active:scale-95 transition-transform"
-          style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)", boxShadow: "0 12px 30px -6px #F3B6D0aa, 0 4px 10px #00000015" }}>
-          {generating ? <Loader2 size={22} className="animate-spin" /> : <Sparkles size={22} />}
-          {generating ? "Styling…" : "Generate Outfits"}
-        </button>
+        {remaining <= 0 ? (
+          <button onClick={goProfile}
+            className="pointer-events-auto flex items-center gap-2 px-7 py-4 rounded-full font-black text-white text-[15px] active:scale-95 transition-transform"
+            style={{ background: "linear-gradient(135deg,#C6BCD2,#A99FB5)", boxShadow: "0 12px 30px -6px #00000022" }}>
+            <Lock size={19} /> Out of generations today
+          </button>
+        ) : (
+          <button onClick={generate} disabled={generating}
+            className="pointer-events-auto flex items-center gap-2 px-7 py-4 rounded-full font-black text-white text-[16px] active:scale-95 transition-transform"
+            style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)", boxShadow: "0 12px 30px -6px #F3B6D0aa, 0 4px 10px #00000015" }}>
+            {generating ? <Loader2 size={22} className="animate-spin" /> : <Sparkles size={22} />}
+            {generating ? "Styling…" : "Generate Outfits"}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -2443,7 +2498,7 @@ function OnboardingCloset({ onBack, onFinish }) {
 }
 
 /* ================= PROFILE ================= */
-function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback }) {
+function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, plan, setPlan, usage, account, setAccount, onShareBonus }) {
   const ratedCount = feedback && feedback.ratings ? Object.keys(feedback.ratings).length : 0;
   const fbA = (feedback && feedback.aesthetic) || {};
   const loved = Object.keys(fbA).filter((a) => fbA[a] > 0).sort((a, b) => fbA[b] - fbA[a]); // styles earned from 4★+ looks
@@ -2456,9 +2511,122 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
   const aiOn = !!aiKeyInput.trim();
   const saveKey = (v) => { setAiKeyInput(v); setAiKey(v); };
 
+  // --- My Account (local profile only — no backend, no password) ---
+  const [acctOpen, setAcctOpen] = useState(false);
+  const [acctName, setAcctName] = useState(account?.name || "");
+  const [acctEmail, setAcctEmail] = useState(account?.email || "");
+  const saveAccount = () => {
+    if (!acctName.trim()) return;
+    setAccount({ name: acctName.trim(), email: acctEmail.trim(), createdAt: account?.createdAt || todayKey() });
+    setAcctOpen(false);
+  };
+  const removeAccount = () => { setAccount(null); setAcctName(""); setAcctEmail(""); setAcctOpen(false); };
+
+  // --- My Plans (local demo — no real payment is collected) ---
+  const activePlan = plan || "free";
+  const shareBonusesToday = (usage && usage.shareBonuses) || 0;
+  const shareCapped = shareBonusesToday >= MAX_SHARE_BONUSES_PER_DAY;
+  const handleShare = async () => {
+    const shareData = { title: "FitCheck", text: "Check out FitCheck — an AI closet & outfit stylist!", url: "https://royliu.github.io/fitcheck/" };
+    try {
+      if (navigator.share) await navigator.share(shareData);
+      else if (navigator.clipboard) { await navigator.clipboard.writeText(shareData.url); }
+    } catch (e) { return; }   // share sheet cancelled — no bonus for a share that didn't happen
+    onShareBonus && onShareBonus();
+  };
+
   return (
     <div className="pb-28">
       <h1 className="text-[34px] leading-tight font-black mb-5" style={{ color: "#5A5167" }}>Profile</h1>
+
+      {/* My Account — local profile only; there's no backend, so this saves on
+          this device/browser only and doesn't sync across phones. */}
+      <label className="text-[19px] font-black tracking-wide block mb-2" style={{ color: "#6E6480" }}>My Account</label>
+      <div className="rounded-3xl p-4 mb-6" style={{ background: account ? "linear-gradient(120deg,#E6F0FB,#F1ECFB)" : "#F6EEF6" }}>
+        {account ? (
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 font-black text-[18px]" style={{ background: "#ffffffcc", color: "#5D87A8" }}>
+              {account.name.trim().charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[16px] font-black truncate" style={{ color: "#5A5167" }}>{account.name}</div>
+              <div className="text-[12px] font-bold" style={{ color: "#A99FB5" }}>Local profile · saved on this device</div>
+            </div>
+            <button onClick={() => setAcctOpen((o) => !o)} className="px-3 py-2 rounded-xl text-[12px] font-extrabold shrink-0" style={{ background: "#ffffffcc", color: "#5D87A8" }}>Edit</button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0" style={{ background: "#ffffffcc" }}>
+              <User size={22} color="#8A7FA0" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[14px] font-black" style={{ color: "#5A5167" }}>No account yet</div>
+              <div className="text-[12px] font-semibold" style={{ color: "#A99FB5" }}>Create one to save your data on this device.</div>
+            </div>
+            <button onClick={() => setAcctOpen((o) => !o)} className="px-3.5 py-2.5 rounded-xl text-[12.5px] font-extrabold text-white shrink-0" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>Create</button>
+          </div>
+        )}
+        {acctOpen && (
+          <div className="mt-4 pt-4" style={{ borderTop: "1.5px solid #ffffff99" }}>
+            <input value={acctName} onChange={(e) => setAcctName(e.target.value)} placeholder="Your name"
+              className="w-full rounded-2xl px-4 py-3 text-[14px] font-bold outline-none mb-2" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
+            <input value={acctEmail} onChange={(e) => setAcctEmail(e.target.value)} placeholder="Email (optional)"
+              className="w-full rounded-2xl px-4 py-3 text-[14px] font-semibold outline-none mb-3" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#6E6480" }} />
+            <div className="flex gap-2">
+              <button onClick={saveAccount} disabled={!acctName.trim()} className="flex-1 py-3 rounded-2xl text-white font-black text-[13px] disabled:opacity-40" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>Save</button>
+              {account && <button onClick={removeAccount} className="px-4 py-3 rounded-2xl font-bold text-[13px]" style={{ background: "#fff", color: "#C99BB5", border: "1.5px solid #EFE3F0" }}>Remove</button>}
+            </div>
+            <p className="text-[11px] font-semibold mt-2.5 leading-relaxed" style={{ color: "#B8AFC6" }}>
+              This is a local profile only — there's no server yet, so it won't sync across other phones or browsers.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* My Plans — demo pricing; no real payment is collected. */}
+      <label className="text-[19px] font-black tracking-wide block mb-1" style={{ color: "#6E6480" }}>My Plans</label>
+      <p className="text-[12.5px] font-semibold mb-3" style={{ color: "#B8AFC6" }}>
+        Demo only — no payment is collected. Picking a plan unlocks its daily generation limit right here.
+      </p>
+      <div className="space-y-2.5 mb-4">
+        {PLANS.map((p) => {
+          const on = activePlan === p.key;
+          return (
+            <button key={p.key} onClick={() => setPlan(p.key)}
+              className="w-full text-left rounded-2xl p-4 flex items-center gap-3 active:scale-[0.99] transition-transform"
+              style={{ background: on ? "#FDE9F1" : "#fff", border: on ? "2px solid #F3A7CB" : "2px solid #F1E6F1" }}>
+              <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: on ? "#F3A7CB" : "transparent", border: on ? "none" : "2px solid #DDD0E6" }}>
+                {on && <Check size={16} color="#fff" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[15px] font-black" style={{ color: "#5A5167" }}>{p.label}</div>
+                <div className="text-[12.5px] font-semibold" style={{ color: "#A99FB5" }}>{p.blurb}</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-[16px] font-black" style={{ color: "#5A5167" }}>{p.price}</div>
+                {p.period && <div className="text-[11px] font-bold" style={{ color: "#C6BCD2" }}>{p.period}</div>}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Eye-catching share-for-bonus CTA */}
+      <div className="rounded-3xl p-5 mb-8" style={{ background: "linear-gradient(120deg,#FFF6DE,#FDE9F1)" }}>
+        <div className="flex items-center gap-2 mb-1.5">
+          <Gift size={20} color="#C39A3E" />
+          <span className="text-[15px] font-black" style={{ color: "#5A5167" }}>Get free generations!</span>
+        </div>
+        <p className="text-[13px] font-semibold mb-3.5 leading-relaxed" style={{ color: "#8A7550" }}>
+          Share FitCheck with a friend and get <b>+{SHARE_BONUS} generations today</b> — up to {MAX_SHARE_BONUSES_PER_DAY} shares a day.
+          {shareCapped ? " Today's bonus is maxed out — check back tomorrow!" : ""}
+        </p>
+        <button onClick={handleShare} disabled={shareCapped}
+          className="w-full py-3.5 rounded-2xl text-white font-black text-[14px] flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-50"
+          style={{ background: "linear-gradient(135deg,#F3A7CB,#C39A3E)" }}>
+          <Share2 size={17} /> Share FitCheck
+        </button>
+      </div>
 
       {/* My Style — tap to open the board of styles you've loved */}
       <button onClick={() => setStyleOpen((o) => !o)}
@@ -2676,10 +2844,12 @@ function FavThumb({ img, pastel }) {
 }
 
 /* ================= ROOT ================= */
+const defaultPrefs = () => ({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback(), plan: "free", usage: null, account: null });
+
 function App() {
   const [hydrated, setHydrated] = useState(false);   // loaded saved state from IndexedDB yet?
   const [onboarded, setOnboarded] = useState(false);
-  const [prefs, setPrefs] = useState({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback() });
+  const [prefs, setPrefs] = useState(defaultPrefs);
   const [tab, setTab] = useState("stylist");
   const [pendingPhoto, setPendingPhoto] = useState(null); // onboarding photo to auto-scan
   const [weather, setWeather] = useState(null);
@@ -2699,7 +2869,7 @@ function App() {
       }
       if (saved) {
         setOnboarded(!!saved.onboarded);
-        if (saved.prefs) setPrefs({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback(), ...saved.prefs });
+        if (saved.prefs) setPrefs({ ...defaultPrefs(), ...saved.prefs });
         // One-time repair: closets saved before the uid() fix could contain two
         // items sharing the same id (a per-session counter restarting at 0 every
         // reload) — that collision is what made tapping one closet item sometimes
@@ -2813,6 +2983,26 @@ function App() {
 
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 1800); };
 
+  // Count one generation against today's plan limit (called right before an
+  // actual "Generate Outfits" run, guarded by the caller so it only fires when
+  // there's still quota left).
+  const useGeneration = () => {
+    setPrefs((p) => { const u = getUsage(p); return { ...p, usage: { ...u, count: u.count + 1 } }; });
+  };
+  // Local, honor-system referral bonus — there's no backend to confirm a friend
+  // actually received the share, so this grants on a successful share action.
+  const grantShareBonus = () => {
+    let capped = false;
+    setPrefs((p) => {
+      const u = getUsage(p);
+      if (u.shareBonuses >= MAX_SHARE_BONUSES_PER_DAY) { capped = true; return p; }
+      return { ...p, usage: { ...u, shareBonuses: u.shareBonuses + 1 } };
+    });
+    showToast(capped ? "Today's share bonus is already maxed out" : `+${SHARE_BONUS} generations today — thanks for sharing!`);
+  };
+  const setPlan = (key) => setPrefs((p) => ({ ...p, plan: key }));
+  const setAccount = (acct) => setPrefs((p) => ({ ...p, account: acct }));
+
   const addItem = (item) => {
     setCloset((c) => [item, ...c]);
     showToast(`${item.name} added to closet`);
@@ -2855,7 +3045,7 @@ function App() {
     <div style={{ fontFamily: "'Nunito', sans-serif", background: "linear-gradient(180deg,#FDF1F6,#F1F4FC)", minHeight: "100vh" }}>
       <div className="mx-auto relative" style={{ maxWidth: 430, minHeight: "100vh", background: "linear-gradient(180deg,#FFFCFE,#FBFAFF)" }}>
         <div className="px-5 pt-8">
-          {tab === "stylist" && <StylistTab closet={closet} favorites={favorites} toggleFav={toggleFav} prefs={prefs} weather={weather} onRate={rateOutfit} onDismiss={dismissOutfit} />}
+          {tab === "stylist" && <StylistTab closet={closet} favorites={favorites} toggleFav={toggleFav} prefs={prefs} weather={weather} onRate={rateOutfit} onDismiss={dismissOutfit} onUseGeneration={useGeneration} goProfile={() => setTab("profile")} />}
           {tab === "closet" && (
             <ClosetTab closet={closet} setCloset={setCloset} trash={trash} setTrash={setTrash} goCamera={() => setTab("camera")} />
           )}
@@ -2864,7 +3054,7 @@ function App() {
             <CameraTab onAdd={addItem} active={tab === "camera"} initialPhoto={pendingPhoto} onConsumeInitial={() => setPendingPhoto(null)} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection} />
           </div>
           {tab === "profile" && (
-            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} />
+            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} account={prefs.account} setAccount={setAccount} onShareBonus={grantShareBonus} />
           )}
         </div>
 
