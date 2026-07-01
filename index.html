@@ -861,10 +861,10 @@ const bareAesthetic = (a) => { a = a || ""; const i = a.indexOf("· "); return (
    — but a user can reset them by clearing site data, since nothing server-side
    enforces the cap. */
 const PLANS = [
-  { key:"free", label:"Free",      price:"$0",     period:"",    limit:20,       blurb:"20 outfit generations a day" },
-  { key:"plus", label:"Plus",      price:"$4.99",  period:"/mo", limit:25,       blurb:"25 generations a day" },
-  { key:"pro",  label:"Pro",       price:"$9.99",  period:"/mo", limit:45,       blurb:"45 generations a day" },
-  { key:"max",  label:"Unlimited", price:"$19.99", period:"/mo", limit:Infinity, blurb:"Unlimited generations, every day" },
+  { key:"free", label:"Closet Starter",  price:"$0",     period:"",    limit:15,       blurb:"15 outfit generations a day" },
+  { key:"plus", label:"Glow Up",         price:"$4.99",  period:"/mo", limit:22,       blurb:"22 generations a day" },
+  { key:"pro",  label:"Main Character",  price:"$9.99",  period:"/mo", limit:35,       blurb:"35 generations a day" },
+  { key:"max",  label:"Icon",            price:"$99.99", period:"/mo", limit:Infinity, blurb:"Unlimited generations, every day" },
 ];
 const SHARE_BONUS = 5;                 // bonus generations granted per share
 const MAX_SHARE_BONUSES_PER_DAY = 4;   // caps stacking from repeated taps (20/day max)
