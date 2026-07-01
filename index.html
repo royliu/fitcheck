@@ -99,8 +99,12 @@ const CatIcon = ({ category, size = 24, color }) => {
 
 /* ---------- Seed Data ---------- */
 /* Closet starts empty — items are added by capturing them in the Camera tab. */
+// Must stay unique ACROSS reloads (the closet persists in IndexedDB) — a plain
+// per-session counter would restart at 0 every load and collide with ids already
+// in the saved closet, causing React key clashes and "wrong item" bugs (a click
+// resolving to whichever item happens to share that id).
 let _id = 0;
-const uid = () => `item_${_id++}`;
+const uid = () => `item_${Date.now().toString(36)}_${(_id++).toString(36)}_${Math.random().toString(36).slice(2,7)}`;
 const mk = (name, category, color, fav = false, wash = false) =>
   ({ id: uid(), name, category, color, fav, wash });
 
@@ -682,12 +686,14 @@ const OCCASION_RULES = [
   // Smart-casual social — brunch, coffee, family/holiday gatherings, photos
   { match:/brunch|lunch|coffee|cafe|gathering|holiday|family|reunion|shower|photo|picnic/i,
     boost:[/blouse|sundress|midi dress|jean|cardigan|skirt|loafer|ballet flat|sweater/], avoid:[/sweatpant|gym|hoodie/] },
-  // School / class
+  // School / class — jeans/tees/sneakers territory; a dressy dress reads as
+  // overdressed (sundress is the one exception, still fine for a warm campus day).
   { match:/school|class|college|campus|lecture|study/i,
-    boost:[/jean|sweater|hoodie|sneaker|cardigan|t-shirt|tee|trouser|cargo|skirt/], avoid:[/heel|bodycon|gown|sequin/] },
-  // Everyday casual — hangouts, errands, shopping
+    boost:[/jean|sweater|hoodie|sneaker|cardigan|t-shirt|tee|trouser|cargo|skirt/], avoid:[/heel|bodycon|gown|sequin|(?<!sun)dress/] },
+  // Everyday casual — hangouts, errands, shopping. Same logic: a sundress is
+  // casual, but a mini/bodycon/midi dress reads too done-up for a hangout.
   { match:/casual|hangout|hang out|errand|weekend|chill|mall|shopping|day out|stroll/i,
-    boost:[/jean|t-shirt|tee|sneaker|sweater|cardigan|hoodie|short|sundress/], avoid:[/heel|bodycon|gown|blazer/] },
+    boost:[/jean|t-shirt|tee|sneaker|sweater|cardigan|hoodie|short|sundress/], avoid:[/heel|bodycon|gown|blazer|(?<!sun)dress/] },
   // Travel — comfort first
   { match:/travel|flight|airport|road ?trip|commute|plane/i,
     boost:[/legging|sweatpant|hoodie|sneaker|jean|sweater|cardigan|tank/], avoid:[/heel|bodycon|gown|blazer|trouser/] },
@@ -2694,8 +2700,22 @@ function App() {
       if (saved) {
         setOnboarded(!!saved.onboarded);
         if (saved.prefs) setPrefs({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback(), ...saved.prefs });
-        if (saved.closet) setCloset(saved.closet);
-        if (saved.trash) setTrash(saved.trash);
+        // One-time repair: closets saved before the uid() fix could contain two
+        // items sharing the same id (a per-session counter restarting at 0 every
+        // reload) — that collision is what made tapping one closet item sometimes
+        // open a different one. Reassign a fresh unique id to any duplicate found.
+        const dedupe = (arr) => {
+          if (!arr) return arr;
+          const seen = new Set(); let changed = false;
+          const out = arr.map((it) => {
+            if (it && it.id && seen.has(it.id)) { changed = true; return { ...it, id: uid() }; }
+            if (it && it.id) seen.add(it.id);
+            return it;
+          });
+          return changed ? out : arr;
+        };
+        if (saved.closet) setCloset(dedupe(saved.closet));
+        if (saved.trash) setTrash(dedupe(saved.trash));
         if (saved.favorites) setFavorites(saved.favorites);
       }
       setHydrated(true);
