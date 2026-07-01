@@ -668,11 +668,13 @@ const OCCASION_RULES = [
   // Date / dinner — romantic, polished
   { match:/date|dinner|romantic|valentine|anniversary/i,
     boost:[/dress|blouse|skirt|heel|ballet flat|trouser|camisole|cardigan/], avoid:[/sweatpant|hoodie|cargo|gym|legging|flannel/] },
-  // Business / professional — work, interviews, meetings
-  { match:/business|work|office|meeting|interview|professional|conference|presentation/i,
+  // Business / professional — work, interviews, meetings ("\bwork\b" so it doesn't
+  // swallow "workout").
+  { match:/business|\bwork\b|office|meeting|interview|professional|conference|presentation/i,
     boost:[/blazer|trouser|button-up|loafer|midi skirt|trench|knit sweater|heel|turtleneck|pumps/], avoid:[/hoodie|sweatpant|cargo|crop top|graphic|sneaker|short|bodycon|legging/] },
-  // Concert / festival — trendy and edgy; casual stays fine
-  { match:/concert|festival|show|gig|rave|bar\b/i,
+  // Concert / festival — trendy and edgy; casual stays fine ("\bshow\b" so it
+  // doesn't swallow "shower").
+  { match:/concert|festival|\bshow\b|gig|rave|\bbar\b/i,
     boost:[/boot|leather jacket|denim jacket|graphic|crop top|cargo|bomber|skirt|sneaker/], avoid:[/blazer|trouser|loafer|pumps|trench/] },
   // Church / worship — modest, smart
   { match:/church|worship|service|temple|mass|mosque/i,
