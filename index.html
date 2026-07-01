@@ -73,7 +73,7 @@ const ACCESSORY_SUBCATS = [
 ];
 
 const AESTHETICS = ["Streetwear","Minimalist","Coquette","Clean Girl","Dark Academia","Grunge","Soft Girl","Cottagecore","Y2K","Romantic Feminine","Boho","Angelcore","Baddie","Hipster","Indie","Kawaii"];
-const OCCASIONS = ["School Day","Work / Office","Business Meeting","Job Interview","Casual Hangout","Brunch","Date Night","Dinner Out","Party","Birthday Party","Night Out","Concert / Festival","Wedding","Formal Event","Graduation","Church","Vacation","Beach Day","Gym / Workout","Travel Day"];
+const OCCASIONS = ["School Day","Work / Office","Business Meeting","Job Interview","Casual Hangout","Brunch","Date Night","Dinner Out","Party","Birthday Party","Night Out","Concert / Festival","Classical Concert / Recital","Wedding","Formal Event","Graduation","Church","Vacation","Beach Day","Gym / Workout","Travel Day"];
 
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
 
@@ -663,9 +663,9 @@ function aestheticAffinity(item, aesthetic){
    dropdown options AND a free-typed occasion (e.g. "frat party" → party rules). */
 /* First matching rule wins, so the dressiest / most specific occasions come first. */
 const OCCASION_RULES = [
-  // Formal — weddings, galas, graduations: dressy, no denim/sneakers/sweats
-  { match:/formal|wedding|gala|cocktail|ceremony|banquet|prom|black ?tie|graduation|gown/i,
-    boost:[/dress|maxi dress|midi dress|gown|heel|blouse|trouser|blazer|mules|pumps/], avoid:[/jean|denim|sweat|hoodie|cargo|sneaker|short|legging|flannel|tank|gym/] },
+  // Formal — weddings, galas, graduations, recitals: dressy, no denim/sneakers/sandals/sweats
+  { match:/formal|wedding|gala|cocktail|ceremony|banquet|prom|black ?tie|graduation|gown|recital|classical concert|symphony|orchestra|opera/i,
+    boost:[/dress|maxi dress|midi dress|gown|heel|blouse|trouser|blazer|mules|pumps/], avoid:[/jean|denim|sweat|hoodie|cargo|sneaker|short|legging|flannel|tank|gym|sandal/] },
   // Party / night out — birthdays, clubs, dances: dressy, lean skirts/dresses/heels
   { match:/party|club|night ?out|birthday|homecoming|dance|new ?year|nye|going out/i,
     boost:[/dress|bodycon|mini skirt|skirt|heel|blouse|crop top|camisole|mules/], avoid:[/sweatpant|hoodie|cargo|legging|sneaker|gym|jean|sundress|flannel|puffer/] },
