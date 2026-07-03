@@ -45,7 +45,7 @@ import { createRoot } from "react-dom/client";
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260703115521";
+const APP_VERSION = "20260703134921";
 
 /* ---------- Theme ---------- */
 const CREAM = "#FFFCFB";
@@ -1291,6 +1291,79 @@ function OutfitCard({ o, fav, rating, baseLabel, onFav, onRate, onDismiss }) {
   );
 }
 
+/* A single look from the My Style mood board, opened full-size — same visual
+   design as a generated OutfitCard (collage, title, rating, item list, note),
+   just as a static modal instead of a swipeable card. */
+function MoodBoardDetail({ outfit: o, pastel: p, rating, fav, onClose, onRate, onFav }) {
+  const [noteOpen, setNoteOpen] = useState(false);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "#00000066" }} onClick={onClose}>
+      <div className="w-full mx-auto rounded-3xl overflow-hidden flex flex-col" style={{ maxWidth: 400, maxHeight: "88vh", background: p.bg }} onClick={(e) => e.stopPropagation()}>
+        <div className="p-4 overflow-y-auto">
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-[17px] font-black" style={{ color: p.text }}>{o.title}</h3>
+            <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "#ffffffcc" }}>
+              <X size={18} color={p.text} />
+            </button>
+          </div>
+          <OutfitCollage items={o.items} pastel={p} />
+          <div className="flex items-center justify-between mt-3 gap-2">
+            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold px-2.5 py-1 rounded-full" style={{ background: "#ffffffaa", color: p.text }}>
+              <Sparkles size={11} /> {o.aesthetic}
+            </span>
+            {onFav && (
+              <button onClick={() => onFav(o)}
+                className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0"
+                style={{ background: fav ? p.ring : "#ffffffcc" }}>
+                <Heart size={18} color={p.text} fill={fav ? p.text : "none"} />
+              </button>
+            )}
+          </div>
+
+          {/* rating */}
+          <div className="mt-3 rounded-2xl px-3.5 py-2.5" style={{ background: "#ffffffcc" }}>
+            <div className="text-[11.5px] font-extrabold mb-1.5" style={{ color: p.text }}>
+              {rating >= STYLE_STARS ? "★ Loved — part of your style" : "Rate this look"}
+            </div>
+            <div className="flex items-center gap-1.5">
+              {[1, 2, 3, 4, 5].map((s) => (
+                <button key={s} onClick={() => onRate && onRate(o, s)} className="active:scale-90 transition-transform" aria-label={"rate " + s + " stars"}>
+                  <Star size={26} color={p.text} fill={s <= rating ? p.text : "none"} strokeWidth={2.25} />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* item list */}
+          <div className="mt-3 space-y-1.5">
+            {o.items.map((it, k) => (
+              <div key={k} className="flex items-center gap-2.5 px-3 py-2 rounded-2xl" style={{ background: "#ffffff99" }}>
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 overflow-hidden" style={{ background: p.ring }}>
+                  {it.photo
+                    ? <img src={it.photo} alt="" className="w-full h-full object-cover" />
+                    : <CatIcon category={it.category} size={15} color={p.text} />}
+                </div>
+                <span className="text-[13px] font-extrabold" style={{ color: "#5A5167" }}>{it.name}</span>
+                <span className="ml-auto text-[11px] font-bold" style={{ color: p.text }}>{it.category}</span>
+              </div>
+            ))}
+          </div>
+
+          <button onClick={() => setNoteOpen((v) => !v)}
+            className="mt-3 w-full flex items-center justify-between px-4 py-2.5 rounded-2xl text-[13px] font-extrabold"
+            style={{ background: "#ffffffaa", color: p.text }}>
+            Stylist Note
+            <ChevronDown size={16} style={{ transform: noteOpen ? "rotate(180deg)" : "none", transition: "transform .25s" }} />
+          </button>
+          <div style={{ maxHeight: noteOpen ? 220 : 0, overflow: "hidden", transition: "max-height .35s ease" }}>
+            <p className="text-[13px] font-semibold leading-relaxed px-1 pt-3" style={{ color: p.text }}>{o.note}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDismiss, onUseGeneration, goProfile }) {
   const [occasion, setOccasion] = useState("");
   const [custom, setCustom] = useState("");
@@ -2032,27 +2105,32 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
           <div className="absolute left-0 right-0 h-1" style={{ background: "#F8A7C5", boxShadow: "0 0 16px 4px #F8A7C5", animation: "scan 1.5s linear infinite" }} />
         )}
 
-        {/* flip front/back camera */}
-        {camState === "live" && !photo && !scanning && (
-          <button onClick={flipCamera} aria-label="switch camera"
-            className="absolute top-3 right-3 w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform"
-            style={{ background: "#ffffffd0" }}>
-            <RotateCcw size={18} color="#5A5167" />
-          </button>
-        )}
       </div>
 
       {/* hidden upload input */}
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
 
-      {/* Shutter + Upload */}
+      {/* Shutter + Upload — flip camera sits right beside the shutter, like a
+          regular camera app's bottom control row. */}
       {!results && !scanning && (
         <div className="flex flex-col items-center gap-4 mt-2">
-          <button onClick={snap} disabled={camState === "starting"}
-            className="w-24 h-24 rounded-full flex items-center justify-center active:scale-90 transition-transform disabled:opacity-50"
-            style={{ background: "#fff", boxShadow: "0 0 0 6px #FBD0E2, 0 8px 24px -4px #F3B6D055" }}>
-            <CameraIcon size={36} color="#E891B5" />
-          </button>
+          <div className="flex items-center justify-center gap-5">
+            <div style={{ width: 44 }} />{/* balances the flip button so the shutter stays visually centered */}
+            <button onClick={snap} disabled={camState === "starting"}
+              className="w-24 h-24 rounded-full flex items-center justify-center active:scale-90 transition-transform disabled:opacity-50"
+              style={{ background: "#fff", boxShadow: "0 0 0 6px #FBD0E2, 0 8px 24px -4px #F3B6D055" }}>
+              <CameraIcon size={36} color="#E891B5" />
+            </button>
+            {camState === "live" && !photo ? (
+              <button onClick={flipCamera} aria-label="switch camera"
+                className="rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                style={{ width: 44, height: 44, background: "#F4EEF5" }}>
+                <RotateCcw size={20} color="#8A7FA0" />
+              </button>
+            ) : (
+              <div style={{ width: 44 }} />
+            )}
+          </div>
           <button onClick={() => fileRef.current && fileRef.current.click()}
             className="flex items-center gap-2 px-5 py-2.5 rounded-full text-[13px] font-extrabold active:scale-95 transition-transform"
             style={{ background: "#F4EEF5", color: "#8A7FA0" }}>
@@ -2415,10 +2493,11 @@ function OnboardingCloset({ onBack, onFinish }) {
 }
 
 /* ================= PROFILE ================= */
-function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, plan, setPlan, usage, account, setAccount, onShareBonus }) {
+function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, account, setAccount, onShareBonus }) {
   const ratedCount = feedback && feedback.ratings ? Object.keys(feedback.ratings).length : 0;
   const loved = styleBoard || [];   // the actual looks rated STYLE_STARS+ — the mood board
   const [styleOpen, setStyleOpen] = useState(false);
+  const [detail, setDetail] = useState(null);   // { outfit, pastel } — the single look opened full-size
   const toggle = (a) =>
     setAesthetics(aesthetics.includes(a) ? aesthetics.filter((x) => x !== a) : [...aesthetics, a]);
 
@@ -2445,6 +2524,57 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
     } catch (e) { return; }   // share sheet cancelled — no bonus for a share that didn't happen
     onShareBonus && onShareBonus();
   };
+
+  // --- My Style — a full mood board, opened over the Profile with a back arrow ---
+  if (styleOpen) {
+    return (
+      <div className="pb-28">
+        <button onClick={() => setStyleOpen(false)} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-4" style={{ color: "#A99FB5" }}>
+          <ArrowLeft size={18} /> Profile
+        </button>
+        <h1 className="text-2xl font-black mb-1" style={{ color: "#5A5167" }}>My Style</h1>
+        <p className="text-sm font-semibold mb-5" style={{ color: "#A99FB5" }}>
+          Looks you've rated {STYLE_STARS}★ or higher{ratedCount ? ` · ${ratedCount} rated so far` : ""}. Tap a look for a closer view.
+        </p>
+
+        {loved.length === 0 ? (
+          <div className="rounded-3xl p-8 text-center" style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
+            <div className="w-16 h-16 rounded-3xl mx-auto flex items-center justify-center mb-3" style={{ background: "#ffffffcc" }}>
+              <Star size={28} color="#C56B96" />
+            </div>
+            <div className="text-[15px] font-black" style={{ color: "#5A5167" }}>No loved looks yet</div>
+            <p className="text-[13px] font-semibold mt-1" style={{ color: "#A99FB5" }}>Rate looks {STYLE_STARS}★ or higher in the Stylist and they'll collect here.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            {loved.map((o, i) => {
+              const p = PASTELS[i % PASTELS.length];
+              return (
+                <button key={o.id} onClick={() => setDetail({ outfit: o, pastel: p })}
+                  className="text-left rounded-3xl overflow-hidden active:scale-[0.97] transition-transform" style={{ background: p.bg }}>
+                  <OutfitCollage items={o.items} pastel={p} height={130} />
+                  <div className="p-2.5">
+                    <div className="text-[13px] font-black leading-tight truncate" style={{ color: p.text }}>{o.title}</div>
+                    <div className="text-[10.5px] font-bold mt-0.5 flex items-center gap-1" style={{ color: p.text + "bb" }}>
+                      <Star size={10} fill={p.text} color={p.text} /> {o.rating}★ · {o.aesthetic}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {detail && (
+          <MoodBoardDetail
+            outfit={detail.outfit} pastel={detail.pastel} onClose={() => setDetail(null)}
+            rating={(feedback && feedback.ratings && feedback.ratings[detail.outfit.id]) || 0}
+            fav={favorites.some((f) => f.id === detail.outfit.id)}
+            onRate={onRate} onFav={toggleFav} />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="pb-28">
@@ -2539,9 +2669,9 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
         </button>
       </div>
 
-      {/* My Style — tap to open the board of styles you've loved */}
-      <button onClick={() => setStyleOpen((o) => !o)}
-        className="w-full text-left rounded-3xl p-5 mb-3 flex items-center gap-4 active:scale-[0.99] transition-transform"
+      {/* My Style — opens the mood board as its own full view over Profile */}
+      <button onClick={() => setStyleOpen(true)}
+        className="w-full text-left rounded-3xl p-5 mb-6 flex items-center gap-4 active:scale-[0.99] transition-transform"
         style={{ background: "linear-gradient(120deg,#FDE9F1,#F1ECFB)" }}>
         <div className="w-16 h-16 rounded-2xl overflow-hidden flex items-center justify-center shrink-0" style={{ background: "#ffffffcc" }}>
           {closetPhoto ? <img src={closetPhoto} alt="" className="w-full h-full object-cover" /> : <User size={30} color="#C56B96" />}
@@ -2552,41 +2682,8 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
             {plural(closetCount, "piece")} · {plural(aesthetics.length, "aesthetic")} · {favorites.length} saved
           </div>
         </div>
-        <ChevronDown size={22} color="#C99BB5" style={{ transform: styleOpen ? "rotate(180deg)" : "none", transition: "transform .25s" }} />
+        <ArrowRight size={20} color="#C99BB5" />
       </button>
-
-      {/* style board — a mood board of the actual looks you've rated highly */}
-      {styleOpen && (
-        <div className="rounded-3xl p-4 mb-6" style={{ background: "#fff", border: "1.5px solid #F1E6F1" }}>
-          <p className="text-[12.5px] font-bold mb-3 flex items-start gap-1.5" style={{ color: "#A99FB5" }}>
-            <Star size={13} color="#C99BB5" fill="#C99BB5" className="mt-0.5 shrink-0" />
-            <span>Rate a look {STYLE_STARS}★ or higher in the Stylist and it's added to your mood board{ratedCount ? ` · ${ratedCount} look${ratedCount !== 1 ? "s" : ""} rated so far` : ""}.</span>
-          </p>
-
-          {loved.length === 0 ? (
-            <p className="text-[13px] font-semibold rounded-2xl p-3" style={{ color: "#A99FB5", background: "#FAF3FA" }}>
-              No loved looks yet — rate looks {STYLE_STARS}★ or higher in the Stylist and they'll collect here.
-            </p>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {loved.map((o, i) => {
-                const p = PASTELS[i % PASTELS.length];
-                return (
-                  <div key={o.id} className="rounded-3xl overflow-hidden" style={{ background: p.bg }}>
-                    <OutfitCollage items={o.items} pastel={p} height={130} />
-                    <div className="p-2.5">
-                      <div className="text-[13px] font-black leading-tight truncate" style={{ color: p.text }}>{o.title}</div>
-                      <div className="text-[10.5px] font-bold mt-0.5 flex items-center gap-1" style={{ color: p.text + "bb" }}>
-                        <Star size={10} fill={p.text} color={p.text} /> {o.rating}★ · {o.aesthetic}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* aesthetics editor */}
       <label className="text-[19px] font-black tracking-wide block" style={{ color: "#6E6480" }}>My Aesthetics</label>
@@ -2954,7 +3051,7 @@ function App() {
             <CameraTab onAdd={addItem} active={tab === "camera"} initialPhoto={pendingPhoto} onConsumeInitial={() => setPendingPhoto(null)} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection} />
           </div>
           {tab === "profile" && (
-            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} account={prefs.account} setAccount={setAccount} onShareBonus={grantShareBonus} />
+            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} account={prefs.account} setAccount={setAccount} onShareBonus={grantShareBonus} />
           )}
         </div>
 
