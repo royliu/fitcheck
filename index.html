@@ -45,7 +45,7 @@ import { createRoot } from "react-dom/client";
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260703134921";
+const APP_VERSION = "20260703140819";
 
 /* ---------- Theme ---------- */
 const CREAM = "#FFFCFB";
@@ -595,46 +595,182 @@ const KOREAN_PHOTOS = [
 /* Build a varied, contextual stylist note: silhouette cue + layering + how it
    fits the vibe/aesthetic/occasion/weather. Rotates phrasing by outfit index so
    the five looks don't read the same. */
+/* ---------- stylist notes: casual, Gen-Z-influencer voice, genuinely varied ----------
+   Real randomness (Math.random — this runs live in the browser, not a build
+   script) across many interchangeable fragments AND multiple sentence shapes,
+   so five looks in one batch (and different batches) don't read like the same
+   fill-in-the-blank template. */
+const randPick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const capFirst = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+function joinNatural(parts){
+  if(parts.length===1) return parts[0];
+  return parts.slice(0,-1).join(", ") + ", and " + parts[parts.length-1];
+}
+
+/* Weather line — anchored on the outerwear piece when there is one (that's the
+   real reason weather matters to an outfit), otherwise a generic temp-appropriate
+   line. */
+function weatherLine(w, outer){
+  if(!w || w.temp==null) return null;
+  const t = w.temp, cond = (w.condition||"").toLowerCase() || "mild";
+  if(outer){
+    const n = outer.name.toLowerCase();
+    return randPick([
+      `the ${t}° weather is perfect for a ${n} you can throw on open or button up depending on how you're feeling`,
+      `at ${t}° out, the ${n} is the easiest layer — light enough to carry around and put on whenever you actually need it`,
+      `${t}° and ${cond} means the ${n} is doing exactly what it should, on or off all day`,
+      `it's ${t}° out there, and the ${n} gives you just enough warmth without committing to a full coat`,
+      `${t}° is basically made for a piece like the ${n} — easy to layer, easy to lose when it warms up`,
+    ]);
+  }
+  if(t<=45) return randPick([
+    `it's a chilly ${t}° out, so this fit is built to actually keep you warm, not just look good`,
+    `at ${t}°, you'll want to move fast between places — this one's warm enough to handle it`,
+  ]);
+  if(t<=60) return randPick([
+    `${t}° and ${cond} out is that in-between weather where you don't want to overdress or underdress, and this hits the mark`,
+    `it's a cool ${t}° — nothing here is too heavy or too thin for it`,
+  ]);
+  if(t<=78) return randPick([
+    `${t}° and ${cond} is honestly the easiest weather to dress for, so this fit doesn't have to work hard`,
+    `it's a solid ${t}° out — no jacket needed, just the vibe`,
+  ]);
+  return randPick([
+    `it's heating up to ${t}°, so breathable pieces are the move here`,
+    `with the heat sitting at ${t}°, this look keeps things light so you're not dying by noon`,
+  ]);
+}
+
+const STYLE_TIPS = {
+  dress: (d) => randPick([
+    `just let the ${d} do all the work here, it's a one-and-done kind of piece`,
+    `the ${d} is basically the whole outfit — everything else is just backup`,
+    `no need to overthink it, the ${d} speaks for itself`,
+    `the ${d} does the heavy lifting so you don't have to think past it`,
+  ]),
+  topBottom: (top, bottom) => randPick([
+    `tuck the ${top} into the ${bottom} for a bit more shape, or leave it loose if you're feeling lazy today — both work`,
+    `half-tuck the ${top} into the ${bottom} and you're basically done, no overthinking needed`,
+    `let the ${top} fall loose over the ${bottom} for that didn't-try-too-hard look`,
+    `knot the ${top} at the waist over the ${bottom} for a little extra shape`,
+    `keep the ${top} relaxed and let the ${bottom} do the structural work — easy balance`,
+    `tuck in just the front of the ${top} for a quick, effortless shape with the ${bottom}`,
+  ]),
+  topOnly: (top) => randPick([
+    `let the ${top} be the main character here and keep everything else quiet`,
+    `build the whole look around the ${top} — it's doing enough on its own`,
+  ]),
+  bottomOnly: (bottom) => randPick([
+    `keep it simple up top and let the ${bottom} lead the look`,
+    `build around the ${bottom} with something fitted up top so it doesn't get lost`,
+  ]),
+  generic: () => randPick([`keep the proportions easy and let the pieces do their own thing`]),
+};
+
+function outerLine(outer){
+  const n = outer.name.toLowerCase();
+  return randPick([
+    `throw the ${n} on open so it doesn't fight with the rest of the fit, or button it up if it gets colder`,
+    `the ${n} is an easy add — wear it open for a relaxed look, or buttoned if you want it more put together`,
+    `layer the ${n} over everything, you can take it on and off all day depending on how you're feeling`,
+    `the ${n} pulls the whole thing together without you having to think about it twice`,
+  ]);
+}
+
+function shoePhrase(shoe){
+  const n = shoe.name.toLowerCase();
+  if(/sneaker|chuck|converse/i.test(n)) return randPick([
+    `some ${n} to keep it cool and low-key`,
+    `the ${n} for an easy, no-effort finish`,
+    `${n} because comfort still matters more than people think`,
+  ]);
+  if(/heel|pump|stiletto|mule/i.test(n)) return randPick([
+    `the ${n} for a little drama`,
+    `${n} to dress the whole thing up instantly`,
+  ]);
+  if(/boot/i.test(n)) return randPick([
+    `the ${n} for a bit of edge`,
+    `${n} to ground the look without trying too hard`,
+  ]);
+  if(/sandal/i.test(n)) return randPick([
+    `the ${n} to keep it breezy`,
+    `${n} for a low-maintenance finish`,
+  ]);
+  if(/mary jane|flat|loafer/i.test(n)) return randPick([
+    `the ${n} to keep things polished but still comfortable`,
+  ]);
+  return randPick([`the ${n} to finish it off`, `some ${n} to round it out`]);
+}
+
+function accPhrase(it){
+  const n = it.name.toLowerCase(), sub = it.subcategory || "";
+  if(sub==="Bags") return randPick([
+    `a ${n} to carry your stuff without messing up the fit`,
+    `the ${n} for your phone, cards, whatever you actually need today`,
+  ]);
+  if(sub==="Headwear & Neckwear") return randPick([
+    `a ${n} to look cool and a little mysterious`,
+    `the ${n} for some main-character energy`,
+    `throw on the ${n} for just enough personality`,
+  ]);
+  if(sub==="Jewelry") return randPick([
+    `the ${n} for a little extra shine`,
+    `the ${n}, a small detail that actually makes a difference`,
+  ]);
+  if(sub==="Glasses") return randPick([`the ${n} to tie it all together`]);
+  if(sub==="Belts") return randPick([`the ${n} to cinch things in a bit`]);
+  if(sub==="Socks") return randPick([`the ${n}, because little details matter too`]);
+  return randPick([`the ${n} to finish things off`]);
+}
+
+function vibeLine(aesthetic, occasion, baseStyle){
+  const base = baseStyle==="Korean" ? "clean, put-together Korean-street" : baseStyle==="Cali" ? "sun-washed Cali" : "effortless";
+  const aes = aesthetic ? aesthetic.toLowerCase() : "";
+  const occ = occasion ? occasion.toLowerCase() : "";
+  const opts = [];
+  if(aes && occ) opts.push(`it's giving ${aes}, and honestly it's exactly right for ${occ}`);
+  if(aes) opts.push(`total ${aes} energy with a ${base} twist`);
+  if(occ) opts.push(`this is exactly the kind of look you want for ${occ}`);
+  opts.push(`it's giving ${base} — effortless, but still put together`);
+  return randPick(opts);
+}
+
 function makeNote(items, ctx){
   ctx = ctx || {};
-  const idx = ctx.idx || 0;
-  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-  const top=items.find(i=>i.category==="Tops"), bottom=items.find(i=>i.category==="Bottoms"),
-        outer=items.find(i=>i.category==="Outerwear"), shoe=items.find(i=>i.category==="Shoes"),
-        extra=items.find(i=>i.category==="Accessories");
+  const isDressItem = (it) => /dress/i.test(((it.noun||"")+" "+(it.name||"")));
+  const dress = items.find(i => i.category==="Tops" && isDressItem(i));
+  const top = !dress ? items.find(i => i.category==="Tops") : null;
+  const bottom = items.find(i => i.category==="Bottoms");
+  const outer = items.find(i => i.category==="Outerwear");
+  const shoe = items.find(i => i.category==="Shoes");
+  const accs = items.filter(i => i.category==="Accessories");
   const nm = (it) => it ? it.name.toLowerCase() : "";
-  let cues;
-  if(top&&bottom) cues=[
-    `half-tuck the ${nm(top)} into the ${nm(bottom)} and cuff the hem`,
-    `let the ${nm(top)} sit relaxed over the ${nm(bottom)}`,
-    `tuck the ${nm(top)} in to define the waist with the ${nm(bottom)}`];
-  else if(top) cues=[`make the ${nm(top)} the hero and keep the rest quiet`, `let the ${nm(top)} do all the talking`];
-  else if(bottom) cues=[`build around the ${nm(bottom)} with a fitted layer up top`];
-  else cues=[`keep the proportions balanced and easy`];
-  let body = cap(cues[idx % cues.length]) + ".";
-  const adds = [];
-  if(outer) adds.push(`throw the ${nm(outer)} on open`);
-  if(shoe) adds.push(`let the ${nm(shoe)} ground it`);
-  if(extra) adds.push(`finish with the ${nm(extra)}`);
-  if(adds.length) body += " " + cap(adds.join(", ")) + ".";
-  const baseTxt = ctx.baseStyle==="Korean" ? "crisp, trend-forward Korean-street polish"
-                : ctx.baseStyle==="Cali" ? "sun-washed California ease" : "an effortless, pulled-together feel";
-  const aes = ctx.aesthetic ? ctx.aesthetic.toLowerCase() : "";
-  let vibe = "It leans into " + baseTxt + (aes ? " with a " + aes + " touch" : "");
-  const tails = [];
-  if(ctx.occasion) tails.push("right for " + ctx.occasion.toLowerCase());
-  const w = ctx.weather;
-  if(w && w.temp!=null){
-    let wa;
-    if(w.temp<=45) wa = "warm enough for the " + w.temp + "° chill";
-    else if(w.temp<=60) wa = "layered for the " + w.temp + "° " + w.condition.toLowerCase();
-    else if(w.temp<=78) wa = "easy in the " + w.temp + "° " + w.condition.toLowerCase();
-    else wa = "breezy for the " + w.temp + "° heat";
-    tails.push(wa);
+
+  const mainLine = dress ? STYLE_TIPS.dress(nm(dress))
+    : (top && bottom) ? STYLE_TIPS.topBottom(nm(top), nm(bottom))
+    : top ? STYLE_TIPS.topOnly(nm(top))
+    : bottom ? STYLE_TIPS.bottomOnly(nm(bottom))
+    : STYLE_TIPS.generic();
+
+  const sentences = [];
+  const wLine = weatherLine(ctx.weather, outer);
+  const leadWithWeather = wLine && Math.random() < 0.55;
+  if(leadWithWeather) sentences.push(wLine);
+  sentences.push(mainLine);
+  if(outer && !leadWithWeather) sentences.push(outerLine(outer));
+  if(!leadWithWeather && wLine) sentences.push(wLine);
+
+  const tailPhrases = [];
+  if(shoe) tailPhrases.push(shoePhrase(shoe));
+  accs.slice(0, 2).forEach((a) => tailPhrases.push(accPhrase(a)));
+  if(tailPhrases.length){
+    const opener = randPick(["finish the fit with", "finish it off with", "top it off with", "round it out with"]);
+    sentences.push(`${opener} ${joinNatural(tailPhrases)}`);
   }
-  if(tails.length) vibe += " — " + tails.join(", and ");
-  vibe += ".";
-  return body + " " + vibe;
+
+  if(Math.random() < 0.7) sentences.push(vibeLine(ctx.aesthetic, ctx.occasion, ctx.baseStyle));
+
+  return sentences.map((s) => capFirst(s) + (/[.!]$/.test(s) ? "" : ".")).join(" ");
 }
 
 /* Per-aesthetic affinity model: which garment types + colours read as each
@@ -670,20 +806,40 @@ function aestheticAffinity(item, aesthetic){
 
 /* Occasion → what to lean into vs avoid. Keyword-matched so it works for both the
    dropdown options AND a free-typed occasion (e.g. "frat party" → party rules). */
-/* First matching rule wins, so the dressiest / most specific occasions come first. */
+/* Some categories (sandals, mainly) aren't inherently casual OR formal — it depends
+   on how the user described the piece. If their own item name/type signals it's
+   dressy ("elegant heeled sandals"), don't punish it just for being a sandal. */
+const FANCY_QUALIFIER_RE = /\bformal\b|\bfancy\b|elegant|dressy|\bheeled\b|dress sandal/i;
+const HAT_RE = /\bhat\b|beanie|baseball cap|bucket hat|beret|wide-brim/i;
+/* First matching rule wins, so the dressiest / most specific occasions come first.
+   avoid: hard no, never shown for this occasion.
+   avoidCasual: hard no UNLESS the item's own name/type reads as dressy (FANCY_QUALIFIER_RE) —
+     e.g. plain sandals are out, but "elegant heeled sandals" are fine.
+   limit: still allowed, just soft-deprioritized (shows up less often, not banned). */
 const OCCASION_RULES = [
   // Recital / performance — someone actually PERFORMING (piano/dance recital,
-  // orchestra, choir, etc.): polished and stage-appropriate. No hoodie, winter
+  // orchestra, choir, etc.): polished and stage-appropriate. No hoodie, hats, winter
   // boots/Uggs, sunglasses, or flip-flops — none of that belongs on a performer.
   { match:/recital|performance|performing|classical concert|symphony|orchestra|opera|choir|piano|dance recital/i,
     boost:[/dress|maxi dress|midi dress|blouse|trouser|blazer|heel|pumps|mules|button-up/],
-    avoid:[/hoodie|sweat|jean|denim|cargo|sneaker|short|legging|flannel|tank|gym|sandal|ugg|winter boot|snow boot|sunglasses|flip flop/] },
-  // Formal — weddings, galas, graduations: dressy, no denim/sneakers/sandals/sweats
+    avoid:[HAT_RE, /hoodie|sweat|jean|denim|cargo|sneaker|short|legging|flannel|tank|gym|ugg|winter boot|snow boot|sunglasses|flip flop/],
+    avoidCasual:[/sandal/] },
+  // Formal — weddings, galas, graduations: dressy, no denim/sneakers/sweats/hats/
+  // winter boots. Plain sandals are out, but ones the user calls formal/elegant/
+  // heeled are fine.
   { match:/formal|wedding|gala|cocktail|ceremony|banquet|prom|black ?tie|graduation|gown/i,
-    boost:[/dress|maxi dress|midi dress|gown|heel|blouse|trouser|blazer|mules|pumps/], avoid:[/jean|denim|sweat|hoodie|cargo|sneaker|short|legging|flannel|tank|gym|sandal/] },
-  // Party / night out — birthdays, clubs, dances: dressy, lean skirts/dresses/heels
+    boost:[/dress|maxi dress|midi dress|gown|heel|blouse|trouser|blazer|mules|pumps/],
+    avoid:[HAT_RE, /jean|denim|sweat|hoodie|cargo|sneaker|short|legging|flannel|tank|gym|ugg|winter boot|snow boot/],
+    avoidCasual:[/sandal/] },
+  // Party / night out — birthdays, clubs, dances: dressy, lean skirts/dresses/heels.
+  // Sneakers/chucks are allowed but shouldn't dominate every look — fancy shoes get
+  // priority instead. Flip-flops are a hard no (they fall off); plain sandals are
+  // out too unless the user's own item name says they're dressy.
   { match:/party|club|night ?out|birthday|homecoming|dance|new ?year|nye|going out/i,
-    boost:[/dress|bodycon|mini skirt|skirt|heel|blouse|crop top|camisole|mules/], avoid:[/sweatpant|hoodie|cargo|legging|sneaker|gym|jean|sundress|flannel|puffer/] },
+    boost:[/dress|bodycon|mini skirt|skirt|heel|blouse|crop top|camisole|mules/],
+    avoid:[/sweatpant|hoodie|cargo|legging|gym|jean|sundress|flannel|puffer|flip flop/],
+    avoidCasual:[/sandal/],
+    limit:[/sneaker|chuck|converse/] },
   // Date / dinner — romantic, polished
   { match:/date|dinner|romantic|valentine|anniversary/i,
     boost:[/dress|blouse|skirt|heel|ballet flat|trouser|camisole|cardigan/], avoid:[/sweatpant|hoodie|cargo|gym|legging|flannel/] },
@@ -719,14 +875,31 @@ const OCCASION_RULES = [
   { match:/beach|pool|vacation|resort|tropical|cruise|summer/i,
     boost:[/sundress|short|sandal|tank|maxi dress|camisole/], avoid:[/coat|wool|blazer|boot|heel|sweater|puffer|trench|sneaker|mary jane|loafer|ballet flat|mules|jean/] },
 ];
+/* Hard exclusion only — used as the pass/fail GATE (>=0 means "allowed at all").
+   A "limit" item is NOT excluded here; it's still fully eligible, just ranked
+   lower by occasionAffinity() below. */
+function occasionAvoid(item, occText){
+  if(!occText) return 0;
+  const rule = OCCASION_RULES.find(r => r.match.test(occText));
+  if(!rule) return 0;
+  const txt = ((item.noun||"")+" "+(item.name||"")).toLowerCase();
+  const fancy = FANCY_QUALIFIER_RE.test(txt);
+  if(rule.avoid && rule.avoid.some(re => re.test(txt))) return -3;
+  if(rule.avoidCasual && !fancy && rule.avoidCasual.some(re => re.test(txt))) return -3;
+  return 0;
+}
+/* Full ranking signal (used only for scoring/rotation, never as the hard gate):
+   hard-avoid penalty + boost bonus + a gentler "limit" penalty that lets an item
+   still appear sometimes, just not dominate every look. */
 function occasionAffinity(item, occText){
   if(!occText) return 0;
   const rule = OCCASION_RULES.find(r => r.match.test(occText));
   if(!rule) return 0;
   const txt = ((item.noun||"")+" "+(item.name||"")).toLowerCase();
-  let s = 0;
+  const fancy = FANCY_QUALIFIER_RE.test(txt);
+  let s = occasionAvoid(item, occText);
   if(rule.boost.some(re => re.test(txt))) s += 2.5;
-  if(rule.avoid.some(re => re.test(txt))) s -= 3;
+  if(rule.limit && !fancy && rule.limit.some(re => re.test(txt))) s -= 1.2;
   return s;
 }
 
@@ -783,7 +956,7 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
   // rotation would have reached the 3rd) and it would never get picked.
   const pickAccs=(aes,slotIdx)=>{
     const groups = accGroups.map(([sub, items]) => {
-      const ok = items.filter(it => occasionAffinity(it, opts.occasion) >= 0);
+      const ok = items.filter(it => occasionAvoid(it, opts.occasion) >= 0);
       // Unlike tops/bottoms/shoes, an accessory sub-category is never REQUIRED —
       // if every item in it is occasion-inappropriate (e.g. the only glasses you
       // own are sunglasses, wrong for a recital), just skip the whole sub-category
@@ -829,7 +1002,7 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
     const pe=plan[i%plan.length], aes=pe.a;
     const pick=(arr,n)=>{
       if(!arr.length) return null;
-      const ok=arr.filter(it=>occasionAffinity(it,opts.occasion)>=0);
+      const ok=arr.filter(it=>occasionAvoid(it,opts.occasion)>=0);
       const cand=ok.length?ok:arr;
       const ranked=rankedFor(cand,aes);
       const pool=ranked.slice(0,Math.min(n,ranked.length));
@@ -1169,12 +1342,12 @@ function StockImg({ item }) {
   return <img src={src} alt={item.name} className="w-full h-full object-cover"
     onError={() => { const sb = stockImageUrl(item); if (sb && src !== sb) setSrc(sb); }} />;
 }
-function OutfitCollage({ items, pastel, height = 260 }) {
+function OutfitCollage({ items, pastel, height = 260, bg }) {
   const list = (items || []).slice(0, 5);
   const big = list.length <= 2;
   return (
     <div className="w-full rounded-3xl overflow-hidden relative flex flex-wrap items-center justify-center gap-2 p-3"
-      style={{ height, background: pastel.ring + "55" }}>
+      style={{ height, background: bg || (pastel.ring + "55") }}>
       {list.map((it) => (
         <div key={it.id} className="rounded-2xl overflow-hidden bg-white shadow-sm flex items-center justify-center"
           style={{ width: big ? "46%" : "30.5%", height: big ? "88%" : "46%" }}>
@@ -2552,7 +2725,7 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
               return (
                 <button key={o.id} onClick={() => setDetail({ outfit: o, pastel: p })}
                   className="text-left rounded-3xl overflow-hidden active:scale-[0.97] transition-transform" style={{ background: p.bg }}>
-                  <OutfitCollage items={o.items} pastel={p} height={130} />
+                  <OutfitCollage items={o.items} pastel={p} height={130} bg="#fff" />
                   <div className="p-2.5">
                     <div className="text-[13px] font-black leading-tight truncate" style={{ color: p.text }}>{o.title}</div>
                     <div className="text-[10.5px] font-bold mt-0.5 flex items-center gap-1" style={{ color: p.text + "bb" }}>
