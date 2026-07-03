@@ -45,7 +45,7 @@ import { createRoot } from "react-dom/client";
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260703143514";
+const APP_VERSION = "20260703150850";
 
 /* ---------- Theme ---------- */
 const CREAM = "#FFFCFB";
@@ -574,24 +574,6 @@ const AESTHETIC_PHOTOS = {
   _default:"https://images.unsplash.com/photo-1485462537746-965f33f7f6a7?auto=format&fit=crop&w=600&q=70",
 };
 
-const OUTFIT_TITLES = ["Soft Daylight","Easy Lines","Golden Hour","Off-Duty Cool","Quiet Luxe","Sunday Slow","Pretty Casual","Fresh & Clean"];
-
-/* Pinterest-style model photos by base style. Swap these URLs for your own pins. */
-const CALI_PHOTOS = [
-  "https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=600&q=70",
-  "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=600&q=70",
-  "https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=600&q=70",
-  "https://images.unsplash.com/photo-1485462537746-965f33f7f6a7?auto=format&fit=crop&w=600&q=70",
-  "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=600&q=70",
-];
-const KOREAN_PHOTOS = [
-  "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&w=600&q=70",
-  "https://images.unsplash.com/photo-1495385794356-15371f348c31?auto=format&fit=crop&w=600&q=70",
-  "https://images.unsplash.com/photo-1507680434567-5739c80be1ac?auto=format&fit=crop&w=600&q=70",
-  "https://images.unsplash.com/photo-1520975954732-35dd22299614?auto=format&fit=crop&w=600&q=70",
-  "https://images.unsplash.com/photo-1502716119720-b23a93e5fe1b?auto=format&fit=crop&w=600&q=70",
-];
-
 /* Build a varied, contextual stylist note: silhouette cue + layering + how it
    fits the vibe/aesthetic/occasion/weather. Rotates phrasing by outfit index so
    the five looks don't read the same. */
@@ -773,6 +755,67 @@ function makeNote(items, ctx){
   return sentences.map((s) => capFirst(s) + (/[.!]$/.test(s) ? "" : ".")).join(" ");
 }
 
+/* Short vibe words per aesthetic, used to build outfit titles that actually
+   describe the look (not a generic "Golden Hour"-style name unrelated to what's
+   in the outfit). */
+const VIBE_WORDS_BY_AESTHETIC = {
+  "Streetwear": ["Street", "Off-Duty", "Edgy"], "Minimalist": ["Minimalist", "Clean", "Simple"],
+  "Coquette": ["Sweet", "Coquette", "Girly"], "Clean Girl": ["Clean Girl", "Effortless", "Polished"],
+  "Dark Academia": ["Academia", "Moody", "Scholarly"], "Grunge": ["Grunge", "Rebel", "Edgy"],
+  "Soft Girl": ["Soft", "Dreamy", "Sweet"], "Cottagecore": ["Cottagecore", "Whimsical", "Countryside"],
+  "Y2K": ["Y2K", "Retro", "Throwback"], "Romantic Feminine": ["Romantic", "Dreamy", "Feminine"],
+  "Boho": ["Boho", "Free-Spirited", "Earthy"], "Angelcore": ["Angelic", "Ethereal", "Dreamy"],
+  "Baddie": ["Baddie", "Bold", "Fierce"], "Hipster": ["Hipster", "Vintage", "Indie"],
+  "Indie": ["Indie", "Artsy", "Eclectic"], "Kawaii": ["Kawaii", "Playful", "Cute"],
+};
+function titleCaseWords(s){ return s.replace(/\w\S*/g, (t) => t.charAt(0).toUpperCase() + t.slice(1)); }
+/* Build an outfit title that actually reflects the pieces/occasion/aesthetic —
+   e.g. "Elegant Cardigan Over Jeans", "Athletic Workout Fit" — instead of a
+   generic name unrelated to what's in the look. Randomized among several
+   applicable templates so five looks in a batch read differently. */
+function makeTitle(items, ctx){
+  ctx = ctx || {};
+  const isDressItem = (it) => /dress/i.test(((it.noun||"")+" "+(it.name||"")));
+  const dress = items.find(i => i.category==="Tops" && isDressItem(i));
+  const top = !dress ? items.find(i => i.category==="Tops") : null;
+  const bottom = items.find(i => i.category==="Bottoms");
+  const outer = items.find(i => i.category==="Outerwear");
+  const shoe = items.find(i => i.category==="Shoes");
+  const nounOf = (it) => it ? titleCaseWords(it.noun || it.name.split(" ").slice(-1)[0]) : "";
+
+  const vibeWords = VIBE_WORDS_BY_AESTHETIC[ctx.aesthetic] || ["Effortless", "Easy", "Everyday"];
+  const vibe = randPick(vibeWords);
+
+  const occLower = (ctx.occasion || "").toLowerCase();
+  let occWord = null;
+  if(/gym|workout/.test(occLower)) occWord = "Workout";
+  else if(/party|birthday|night out/.test(occLower)) occWord = "Party Ready";
+  else if(/school|class|campus/.test(occLower)) occWord = "School Day";
+  else if(/beach|vacation|resort/.test(occLower)) occWord = "Vacation";
+  else if(/travel|flight|airport|road ?trip/.test(occLower)) occWord = "Travel Day";
+  else if(/formal|wedding|graduation|gala/.test(occLower)) occWord = "Formal";
+  else if(/recital|performance/.test(occLower)) occWord = "Performance";
+  else if(/date|dinner/.test(occLower)) occWord = "Date Night";
+  else if(/business|work|interview|office/.test(occLower)) occWord = "Office Ready";
+  else if(/church/.test(occLower)) occWord = "Sunday Best";
+
+  const colorCounts = {};
+  items.forEach((it) => { if(it.color) colorCounts[it.color] = (colorCounts[it.color]||0) + 1; });
+  const topColors = Object.keys(colorCounts).sort((a,b) => colorCounts[b]-colorCounts[a]).slice(0,2);
+  const colorPhrase = topColors.length===2 ? `${topColors[0]} & ${topColors[1]}` : topColors[0];
+
+  const templates = [];
+  if(outer && (bottom || dress)) templates.push(`${vibe} ${nounOf(outer)} Over ${nounOf(bottom||dress)}`);
+  if(top && bottom) templates.push(`${vibe} ${nounOf(top)} & ${nounOf(bottom)}`);
+  if(dress){ templates.push(`${vibe} ${nounOf(dress)} Moment`); templates.push(`${vibe} Dress Day`); }
+  if(occWord){ templates.push(`${occWord} ${vibe} Fit`); templates.push(`${vibe} ${occWord} Look`); }
+  if(topColors.length){ templates.push(`Simple, ${colorPhrase}`); templates.push(`${colorPhrase} Everyday`); }
+  if(shoe) templates.push(`${vibe} Fit With ${nounOf(shoe)}`);
+  templates.push(`${vibe} ${ctx.aesthetic || "Everyday"} Look`);
+
+  return randPick(templates.filter(Boolean));
+}
+
 /* Per-aesthetic affinity model: which garment types + colours read as each
    aesthetic. Used to bias the built-in stylist toward items that fit the user's
    preferred aesthetics (it's heuristic — the AI stylist reasons about this far
@@ -936,7 +979,6 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
     if(opts.tryNew && i>=3 && others.length){ plan.push({a:others[(i-3)%others.length],familiar:false}); }
     else { plan.push({a:preferred[i%preferred.length],familiar:true}); }
   }
-  const basePhotos = opts.baseStyle==="Korean" ? KOREAN_PHOTOS : CALI_PHOTOS;
   // Weather-aware: skip outerwear when it's warm out.
   const wTemp = opts.weather && opts.weather.temp;
   const wantOuter = (wTemp==null) || wTemp <= 72;
@@ -991,9 +1033,8 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
     const key=items.map(i=>i.id).sort().join("-");if(used.has(key))return;used.add(key);
     outfits.push({
       id:"gen_"+key,
-      title:OUTFIT_TITLES[outfits.length%OUTFIT_TITLES.length],
+      title:makeTitle(items,{ aesthetic:pe.a, occasion:opts.occasion }),
       aesthetic:(opts.baseStyle?opts.baseStyle+" · ":"")+pe.a,
-      img:basePhotos[outfits.length%basePhotos.length],
       note:makeNote(items,{ baseStyle:opts.baseStyle, aesthetic:pe.a, occasion:opts.occasion, weather:opts.weather, idx:outfits.length }),
       items:items.map(i=>({id:i.id,name:i.name,category:i.category,photo:i.photo})),
       familiar:pe.familiar,
@@ -1294,27 +1335,6 @@ function WeatherBar({ weather }) {
   );
 }
 
-function PersonGraphic({ pastel, img }) {
-  const [failed, setFailed] = useState(false);
-  return (
-    <div className="w-full rounded-3xl overflow-hidden relative" style={{ height: 260, background: pastel.ring + "55" }}>
-      {img && !failed ? (
-        <img src={img} alt="outfit on model" loading="lazy" onError={() => setFailed(true)}
-          className="absolute inset-0 w-full h-full object-cover" />
-      ) : (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <svg width="90" height="130" viewBox="0 0 90 130">
-            <circle cx="45" cy="22" r="16" fill={pastel.text} opacity="0.85" />
-            <rect x="28" y="40" width="34" height="42" rx="14" fill={pastel.text} opacity="0.6" />
-            <rect x="30" y="78" width="13" height="40" rx="6" fill={pastel.text} opacity="0.45" />
-            <rect x="47" y="78" width="13" height="40" rx="6" fill={pastel.text} opacity="0.45" />
-          </svg>
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* The outfit "photo" = a moodboard of the user's REAL items, so the image always
    matches the pieces in the look. */
 /* A real online photo of a similar item (matched by color + type from the item's
@@ -1493,7 +1513,7 @@ function MoodBoardDetail({ outfit: o, pastel: p, rating, fav, onClose, onRate, o
               <X size={18} color={p.text} />
             </button>
           </div>
-          <OutfitCollage items={o.items} pastel={p} />
+          <OutfitCollage items={o.items} pastel={p} bg="#fff" />
           <div className="flex items-center justify-between mt-3 gap-2">
             <span className="inline-flex items-center gap-1 text-[11px] font-extrabold px-2.5 py-1 rounded-full" style={{ background: "#ffffffaa", color: p.text }}>
               <Sparkles size={11} /> {o.aesthetic}
@@ -2684,7 +2704,8 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
   const ratedCount = feedback && feedback.ratings ? Object.keys(feedback.ratings).length : 0;
   const loved = styleBoard || [];   // the actual looks rated STYLE_STARS+ — the mood board
   const [styleOpen, setStyleOpen] = useState(false);
-  const [detail, setDetail] = useState(null);   // { outfit, pastel } — the single look opened full-size
+  const [favOpen, setFavOpen] = useState(false);
+  const [detail, setDetail] = useState(null);   // { outfit, pastel } — the single look opened full-size, shared by both mood boards
   const toggle = (a) =>
     setAesthetics(aesthetics.includes(a) ? aesthetics.filter((x) => x !== a) : [...aesthetics, a]);
 
@@ -2745,6 +2766,57 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
                     <div className="text-[10.5px] font-bold mt-0.5 flex items-center gap-1" style={{ color: p.text + "bb" }}>
                       <Star size={10} fill={p.text} color={p.text} /> {o.rating}★ · {o.aesthetic}
                     </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {detail && (
+          <MoodBoardDetail
+            outfit={detail.outfit} pastel={detail.pastel} onClose={() => setDetail(null)}
+            rating={(feedback && feedback.ratings && feedback.ratings[detail.outfit.id]) || 0}
+            fav={favorites.some((f) => f.id === detail.outfit.id)}
+            onRate={onRate} onFav={toggleFav} />
+        )}
+      </div>
+    );
+  }
+
+  // --- Favorited Outfits — same full-mood-board treatment as My Style: real
+  // item-photo collages (not the old stock model pictures), tap to open a
+  // larger card. ---
+  if (favOpen) {
+    return (
+      <div className="pb-28">
+        <button onClick={() => setFavOpen(false)} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-4" style={{ color: "#A99FB5" }}>
+          <ArrowLeft size={18} /> Profile
+        </button>
+        <h1 className="text-2xl font-black mb-1" style={{ color: "#5A5167" }}>Favorited Outfits</h1>
+        <p className="text-sm font-semibold mb-5" style={{ color: "#A99FB5" }}>
+          Looks you loved — the Stylist leans into these when you generate. Tap a look for a closer view.
+        </p>
+
+        {favorites.length === 0 ? (
+          <div className="rounded-3xl p-8 text-center" style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
+            <div className="w-16 h-16 rounded-3xl mx-auto flex items-center justify-center mb-3" style={{ background: "#ffffffcc" }}>
+              <Heart size={28} color="#C56B96" />
+            </div>
+            <div className="text-[15px] font-black" style={{ color: "#5A5167" }}>No favorites yet</div>
+            <p className="text-[13px] font-semibold mt-1" style={{ color: "#A99FB5" }}>Tap the heart on any look in the Stylist tab, or rate one 5★, to save it here.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            {favorites.map((o, i) => {
+              const p = PASTELS[i % PASTELS.length];
+              return (
+                <button key={o.id} onClick={() => setDetail({ outfit: o, pastel: p })}
+                  className="text-left rounded-3xl overflow-hidden active:scale-[0.97] transition-transform" style={{ background: p.bg }}>
+                  <OutfitCollage items={o.items} pastel={p} height={130} bg="#fff" />
+                  <div className="p-2.5">
+                    <div className="text-[13px] font-black leading-tight truncate" style={{ color: p.text }}>{o.title}</div>
+                    <div className="text-[10.5px] font-bold mt-0.5" style={{ color: p.text + "bb" }}>{o.aesthetic}</div>
                   </div>
                 </button>
               );
@@ -2939,57 +3011,21 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
         </button>
       </div>
 
-      {/* favorited outfits */}
-      <label className="text-[19px] font-black tracking-wide block mt-8" style={{ color: "#6E6480" }}>Favorited Outfits</label>
-      <p className="text-[13px] font-semibold mt-1 mb-3" style={{ color: "#B8AFC6" }}>
-        {favorites.length > 0
-          ? "Looks you loved — the Stylist leans into these when you generate."
-          : "Tap the heart on any look in the Stylist tab to save it here."}
-      </p>
-
-      {favorites.length === 0 ? (
-        <div className="rounded-3xl p-8 text-center" style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
-          <div className="w-16 h-16 rounded-3xl mx-auto flex items-center justify-center mb-3" style={{ background: "#ffffffcc" }}>
-            <Heart size={28} color="#C56B96" />
+      {/* favorited outfits — opens as its own full mood board, same as My Style */}
+      <button onClick={() => setFavOpen(true)}
+        className="w-full text-left rounded-3xl p-5 mt-8 flex items-center gap-4 active:scale-[0.99] transition-transform"
+        style={{ background: "linear-gradient(120deg,#FDE9F1,#F1ECFB)" }}>
+        <div className="w-16 h-16 rounded-2xl flex items-center justify-center shrink-0" style={{ background: "#ffffffcc" }}>
+          <Heart size={26} color="#C56B96" fill={favorites.length ? "#C56B96" : "none"} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[18px] font-black" style={{ color: "#5A5167" }}>Favorited Outfits</div>
+          <div className="text-[13px] font-bold" style={{ color: "#A99FB5" }}>
+            {favorites.length > 0 ? `${plural(favorites.length, "look")} saved` : "Tap the heart on a look, or rate it 5★"}
           </div>
-          <div className="text-[15px] font-black" style={{ color: "#5A5167" }}>No favorites yet</div>
-          <p className="text-[13px] font-semibold mt-1" style={{ color: "#A99FB5" }}>Your saved looks will live here.</p>
         </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-3">
-          {favorites.map((o, i) => {
-            const p = PASTELS[i % PASTELS.length];
-            return (
-              <div key={o.id} className="rounded-3xl overflow-hidden" style={{ background: p.bg }}>
-                <div className="relative" style={{ height: 150, background: p.ring + "55" }}>
-                  <FavThumb img={o.img} pastel={p} />
-                  <button onClick={() => toggleFav(o)}
-                    className="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                    style={{ background: "#ffffffdd" }}>
-                    <Heart size={15} color={p.text} fill={p.text} />
-                  </button>
-                </div>
-                <div className="p-3">
-                  <div className="text-[14px] font-black leading-tight" style={{ color: p.text }}>{o.title}</div>
-                  <div className="text-[11px] font-bold mt-0.5" style={{ color: p.text + "bb" }}>{o.aesthetic}</div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function FavThumb({ img, pastel }) {
-  const [failed, setFailed] = useState(false);
-  if (img && !failed) {
-    return <img src={img} alt="" onError={() => setFailed(true)} className="absolute inset-0 w-full h-full object-cover" />;
-  }
-  return (
-    <div className="absolute inset-0 flex items-center justify-center">
-      <Shirt size={36} color={pastel.text} />
+        <ArrowRight size={20} color="#C99BB5" />
+      </button>
     </div>
   );
 }
@@ -3105,6 +3141,8 @@ function App() {
       return { ...p, aesthetics, styleBoard, feedback: { ...fb, ratings: { ...fb.ratings, [outfit.id]: stars }, aesthetic, item } };
     });
     showToast(promoted ? `${a} added to your style ★` : "Thanks — learning your taste");
+    // A perfect 5★ rating automatically favorites the look too.
+    if (stars === 5 && !favorites.some((f) => f.id === outfit.id)) toggleFav(outfit);
   };
 
   // Remember a manual category fix (keyed by garment type) so the same correction
