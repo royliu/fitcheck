@@ -43,6 +43,10 @@ import {
 } from "lucide-react";
 import { createRoot } from "react-dom/client";
 
+/* Stamped with a fresh value at every deploy (see the deploy script) — lets a
+   tab that's been open across a deploy notice a newer build is live. */
+const APP_VERSION = "20260703115521";
+
 /* ---------- Theme ---------- */
 const CREAM = "#FFFCFB";
 const PASTELS = [
@@ -74,7 +78,7 @@ const ACCESSORY_SUBCATS = [
 ];
 
 const AESTHETICS = ["Streetwear","Minimalist","Coquette","Clean Girl","Dark Academia","Grunge","Soft Girl","Cottagecore","Y2K","Romantic Feminine","Boho","Angelcore","Baddie","Hipster","Indie","Kawaii"];
-const OCCASIONS = ["School Day","Work / Office","Business Meeting","Job Interview","Casual Hangout","Brunch","Date Night","Dinner Out","Party","Birthday Party","Night Out","Concert / Festival","Classical Concert / Recital","Wedding","Formal Event","Graduation","Church","Vacation","Beach Day","Gym / Workout","Travel Day"];
+const OCCASIONS = ["School Day","Work / Office","Business Meeting","Job Interview","Casual Hangout","Brunch","Date Night","Dinner Out","Party","Birthday Party","Night Out","Concert / Festival","Recital / Performance","Wedding","Formal Event","Graduation","Church","Vacation","Beach Day","Gym / Workout","Travel Day"];
 
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
 
@@ -202,6 +206,10 @@ const DETAIL_CANDIDATES = {
 /* Layering pieces that should live in Outerwear even when the detector boxed them
    as a "top". */
 const OUTER_TYPES = new Set(["hoodie","sweatshirt","knit sweater","sweater","cardigan"]);
+/* Casual bulky layers that look wrong thrown over a dress (a skirt+top combo is
+   fine with these — only dresses are restricted). Cardigans/blazers/coats are
+   NOT included here since those pair fine over a dress. */
+const CASUAL_LAYER_RE = /hoodie|sweatshirt|sweater/i;
 let _clipMod=null,_clip=null;
 async function getClassifier(onStage){
   if(!_clipMod){ onStage&&onStage("Loading detail model…"); _clipMod=await import("@huggingface/transformers"); _clipMod.env.allowLocalModels=false; }
@@ -664,8 +672,14 @@ function aestheticAffinity(item, aesthetic){
    dropdown options AND a free-typed occasion (e.g. "frat party" → party rules). */
 /* First matching rule wins, so the dressiest / most specific occasions come first. */
 const OCCASION_RULES = [
-  // Formal — weddings, galas, graduations, recitals: dressy, no denim/sneakers/sandals/sweats
-  { match:/formal|wedding|gala|cocktail|ceremony|banquet|prom|black ?tie|graduation|gown|recital|classical concert|symphony|orchestra|opera/i,
+  // Recital / performance — someone actually PERFORMING (piano/dance recital,
+  // orchestra, choir, etc.): polished and stage-appropriate. No hoodie, winter
+  // boots/Uggs, sunglasses, or flip-flops — none of that belongs on a performer.
+  { match:/recital|performance|performing|classical concert|symphony|orchestra|opera|choir|piano|dance recital/i,
+    boost:[/dress|maxi dress|midi dress|blouse|trouser|blazer|heel|pumps|mules|button-up/],
+    avoid:[/hoodie|sweat|jean|denim|cargo|sneaker|short|legging|flannel|tank|gym|sandal|ugg|winter boot|snow boot|sunglasses|flip flop/] },
+  // Formal — weddings, galas, graduations: dressy, no denim/sneakers/sandals/sweats
+  { match:/formal|wedding|gala|cocktail|ceremony|banquet|prom|black ?tie|graduation|gown/i,
     boost:[/dress|maxi dress|midi dress|gown|heel|blouse|trouser|blazer|mules|pumps/], avoid:[/jean|denim|sweat|hoodie|cargo|sneaker|short|legging|flannel|tank|gym|sandal/] },
   // Party / night out — birthdays, clubs, dances: dressy, lean skirts/dresses/heels
   { match:/party|club|night ?out|birthday|homecoming|dance|new ?year|nye|going out/i,
@@ -770,12 +784,16 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
   const pickAccs=(aes,slotIdx)=>{
     const groups = accGroups.map(([sub, items]) => {
       const ok = items.filter(it => occasionAffinity(it, opts.occasion) >= 0);
-      const cand = ok.length ? ok : items;
-      const stable = [...cand].sort((a, b) =>
+      // Unlike tops/bottoms/shoes, an accessory sub-category is never REQUIRED —
+      // if every item in it is occasion-inappropriate (e.g. the only glasses you
+      // own are sunglasses, wrong for a recital), just skip the whole sub-category
+      // rather than falling back to the disallowed item.
+      if (!ok.length) return null;
+      const stable = [...ok].sort((a, b) =>
         (iScore(b.id) + (b.fav?0.6:0) + (favItemIds.has(b.id)?0.6:0)) -
         (iScore(a.id) + (a.fav?0.6:0) + (favItemIds.has(a.id)?0.6:0)));
-      return { sub, stable, aesBest: score(rankedFor(cand, aes)[0], aes) };
-    }).sort((a, b) => b.aesBest - a.aesBest);   // which sub-categories lead is still aesthetic-aware
+      return { sub, stable, aesBest: score(rankedFor(ok, aes)[0], aes) };
+    }).filter(Boolean).sort((a, b) => b.aesBest - a.aesBest);   // which sub-categories lead is still aesthetic-aware
     const out = [];
     for (const g of groups) { if (out.length >= 2) break; out.push(g.stable[slotIdx % g.stable.length]); }
     return out;
@@ -818,8 +836,12 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
       return pool[i%pool.length];
     };
     const top=pick(tops,4);
+    const dress=isDress(top);
+    // A dress doesn't get a hoodie/sweater thrown over it — those are fine over a
+    // skirt+top look, just not over a dress. Blazers/cardigans/coats still can.
+    const outerPool=dress?outer.filter(it=>!CASUAL_LAYER_RE.test((it.noun||"")+" "+(it.name||""))):outer;
     const slotIdx=outfits.length;   // which output look this attempt would become
-    const set=[top, isDress(top)?null:pick(bottoms,4), pick(shoes,3), wantOuter?pick(outer,2):null, ...pickAccs(aes,slotIdx)];
+    const set=[top, dress?null:pick(bottoms,4), pick(shoes,3), wantOuter?pick(outerPool,2):null, ...pickAccs(aes,slotIdx)];
     push(set,pe);
   }
   return outfits.slice(0,5);
@@ -2174,6 +2196,25 @@ function Toast({ msg }) {
   );
 }
 
+/* Persistent banner (not a toast — stays up) telling an already-open tab that a
+   newer build has been deployed, with a one-tap refresh. */
+function UpdateBanner({ show }) {
+  if (!show) return null;
+  return (
+    <div className="fixed left-1/2 -translate-x-1/2 z-[60] px-4" style={{ top: 14, width: "100%", maxWidth: 430 }}>
+      <div className="flex items-center gap-3 px-4 py-3 rounded-2xl shadow-lg" style={{ background: "#2D2A38" }}>
+        <Sparkles size={16} color="#F3A7CB" className="shrink-0" />
+        <span className="flex-1 text-[12.5px] font-bold text-white leading-snug">A newer version of FitCheck is ready</span>
+        <button onClick={() => location.reload()}
+          className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] font-extrabold active:scale-95 transition-transform"
+          style={{ background: "#F3A7CB", color: "#2D2A38" }}>
+          <RotateCcw size={13} /> Refresh
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ================= ONBOARDING ================= */
 function Onboarding({ onDone }) {
   const [step, setStep] = useState("base"); // base | aesthetic | closet
@@ -2672,6 +2713,31 @@ function FavThumb({ img, pastel }) {
 /* ================= ROOT ================= */
 const defaultPrefs = () => ({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback(), styleBoard: [], plan: "free", usage: null, account: null });
 
+/* Polls this SAME page's own URL (no server endpoint needed) for a newer
+   APP_VERSION stamp, so a tab left open across a deploy can prompt a refresh. */
+function useUpdateChecker(){
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const sep = location.pathname.includes("?") ? "&" : "?";
+        const res = await fetch(location.pathname + sep + "_v=" + Date.now(), { cache: "no-store" });
+        if (!res.ok) return;
+        const text = await res.text();
+        const m = text.match(/const APP_VERSION\s*=\s*"([^"]+)"/);
+        if (!cancelled && m && m[1] && m[1] !== APP_VERSION) setUpdateAvailable(true);
+      } catch (e) { /* offline, or blocked — just skip this check */ }
+    };
+    const firstCheck = setTimeout(check, 30000);            // avoid racing a deploy in progress right at load
+    const id = setInterval(check, 3 * 60 * 1000);           // poll every 3 min
+    const onVisible = () => { if (document.visibilityState === "visible") check(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { cancelled = true; clearTimeout(firstCheck); clearInterval(id); document.removeEventListener("visibilitychange", onVisible); };
+  }, []);
+  return updateAvailable;
+}
+
 function App() {
   const [hydrated, setHydrated] = useState(false);   // loaded saved state from IndexedDB yet?
   const [onboarded, setOnboarded] = useState(false);
@@ -2683,6 +2749,7 @@ function App() {
   const [trash, setTrash] = useState(SEED_TRASH);
   const [favorites, setFavorites] = useState([]);
   const [toast, setToast] = useState("");
+  const updateAvailable = useUpdateChecker();
 
   // Load saved state from IndexedDB once (falling back to a one-time migration of
   // the old localStorage build), then start persisting changes.
@@ -2892,6 +2959,7 @@ function App() {
         </div>
 
         <Toast msg={toast} />
+        <UpdateBanner show={updateAvailable} />
 
         {/* Bottom nav */}
         <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full" style={{ maxWidth: 430 }}>
