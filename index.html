@@ -36,7 +36,7 @@
 <script type="text/babel" data-type="module" data-presets="react">
 import React, { useState, useEffect, useRef } from "react";
 import {
-  Sparkles, Search, Heart, Trash2, RotateCcw, Camera as CameraIcon,
+  Sparkles, Search, Heart, Trash2, RotateCcw, RefreshCw, Camera as CameraIcon,
   Shirt, Plus, ChevronDown, Sun, Wind, X, Check, Footprints, Star,
   ShoppingBag, Crown, Watch, Layers, WashingMachine, ArrowLeft, ArrowRight, Loader2, Cloud, User,
   Zap, Lock, Gift, Share2,
@@ -45,7 +45,7 @@ import { createRoot } from "react-dom/client";
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260703140819";
+const APP_VERSION = "20260703143514";
 
 /* ---------- Theme ---------- */
 const CREAM = "#FFFCFB";
@@ -848,8 +848,8 @@ const OCCASION_RULES = [
   { match:/business|\bwork\b|office|meeting|interview|professional|conference|presentation/i,
     boost:[/blazer|trouser|button-up|loafer|midi skirt|trench|knit sweater|heel|turtleneck|pumps/], avoid:[/hoodie|sweatpant|cargo|crop top|graphic|sneaker|short|bodycon|legging/] },
   // Concert / festival — trendy and edgy; casual stays fine ("\bshow\b" so it
-  // doesn't swallow "shower").
-  { match:/concert|festival|\bshow\b|gig|rave|\bbar\b/i,
+  // doesn't swallow "shower"; "\brave\b" so it doesn't swallow "travel").
+  { match:/concert|festival|\bshow\b|gig|\brave\b|\bbar\b/i,
     boost:[/boot|leather jacket|denim jacket|graphic|crop top|cargo|bomber|skirt|sneaker/], avoid:[/blazer|trouser|loafer|pumps|trench/] },
   // Church / worship — modest, smart
   { match:/church|worship|service|temple|mass|mosque/i,
@@ -865,15 +865,23 @@ const OCCASION_RULES = [
   // casual, but a mini/bodycon/midi dress reads too done-up for a hangout.
   { match:/casual|hangout|hang out|errand|weekend|chill|mall|shopping|day out|stroll/i,
     boost:[/jean|t-shirt|tee|sneaker|sweater|cardigan|hoodie|short|sundress/], avoid:[/heel|bodycon|gown|blazer|(?<!sun)dress/] },
-  // Travel — comfort first
-  { match:/travel|flight|airport|road ?trip|commute|plane/i,
-    boost:[/legging|sweatpant|hoodie|sneaker|jean|sweater|cardigan|tank/], avoid:[/heel|bodycon|gown|blazer|trouser/] },
+  // Travel Day — actually IN TRANSIT (plane/train/road trip/commute): pure comfort
+  // for a long ride, deliberately NOT the stylish/photogenic pieces Vacation goes
+  // for (no exception for sundresses here — those are Vacation's job).
+  // Sweats/leggings/hoodies over anything dressy or fitted.
+  { match:/travel|flight|airport|road ?trip|commute|plane|train ride/i,
+    boost:[/legging|sweatpant|hoodie|sneaker|jean|sweater|cardigan|tank|jogger/],
+    avoid:[/heel|bodycon|gown|blazer|trouser|mules|pumps|sandal|skirt|dress/] },
   // Gym / active
   { match:/gym|workout|exercise|run|yoga|sport|hike|pilates|fitness/i,
     boost:[/legging|sweatpant|sneaker|tank|short|hoodie/], avoid:[/dress|heel|blouse|skirt|loafer|trouser|coat|boot|jean|blazer|cardigan|sundress|mary jane|mules|sandal/] },
-  // Beach / vacation
+  // Beach / vacation — stylish, good-in-photos resort wear, deliberately NOT the
+  // cozy loungewear Travel Day is for. Sneakers are fine for sightseeing but
+  // shouldn't dominate every look — sundresses/sandals get priority.
   { match:/beach|pool|vacation|resort|tropical|cruise|summer/i,
-    boost:[/sundress|short|sandal|tank|maxi dress|camisole/], avoid:[/coat|wool|blazer|boot|heel|sweater|puffer|trench|sneaker|mary jane|loafer|ballet flat|mules|jean/] },
+    boost:[/sundress|short|sandal|tank|maxi dress|camisole/],
+    avoid:[/coat|wool|blazer|boot|heel|sweater|puffer|trench|mary jane|loafer|ballet flat|mules|jean|sweatpant|legging|hoodie/],
+    limit:[/sneaker/] },
 ];
 /* Hard exclusion only — used as the pass/fail GATE (>=0 means "allowed at all").
    A "limit" item is NOT excluded here; it's still fully eligible, just ranked
@@ -1000,9 +1008,15 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
   // user owns actually gets a turn, and keep cycling extra rounds to reach five.
   for(let i=0;i<24 && outfits.length<5;i++){
     const pe=plan[i%plan.length], aes=pe.a;
-    const pick=(arr,n)=>{
+    // `required`: tops/bottoms/shoes MUST produce something (an outfit needs them),
+    // so if every item is occasion-avoided, fall back to the full list rather than
+    // leaving the slot empty. Outerwear is OPTIONAL — if every jacket/hoodie is
+    // wrong for the occasion, just skip outerwear entirely instead of forcing in
+    // a banned piece because it's the only one owned.
+    const pick=(arr,n,required=true)=>{
       if(!arr.length) return null;
       const ok=arr.filter(it=>occasionAvoid(it,opts.occasion)>=0);
+      if(!ok.length && !required) return null;
       const cand=ok.length?ok:arr;
       const ranked=rankedFor(cand,aes);
       const pool=ranked.slice(0,Math.min(n,ranked.length));
@@ -1014,7 +1028,7 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
     // skirt+top look, just not over a dress. Blazers/cardigans/coats still can.
     const outerPool=dress?outer.filter(it=>!CASUAL_LAYER_RE.test((it.noun||"")+" "+(it.name||""))):outer;
     const slotIdx=outfits.length;   // which output look this attempt would become
-    const set=[top, dress?null:pick(bottoms,4), pick(shoes,3), wantOuter?pick(outerPool,2):null, ...pickAccs(aes,slotIdx)];
+    const set=[top, dress?null:pick(bottoms,4), pick(shoes,3), wantOuter?pick(outerPool,2,false):null, ...pickAccs(aes,slotIdx)];
     push(set,pe);
   }
   return outfits.slice(0,5);
@@ -2283,12 +2297,12 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
       {/* hidden upload input */}
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
 
-      {/* Shutter + Upload — flip camera sits right beside the shutter, like a
-          regular camera app's bottom control row. */}
+      {/* Shutter + Upload — flip camera sits at the far right of the row, near the
+          edge, the way Apple's Camera app lays out its bottom controls. */}
       {!results && !scanning && (
         <div className="flex flex-col items-center gap-4 mt-2">
-          <div className="flex items-center justify-center gap-5">
-            <div style={{ width: 44 }} />{/* balances the flip button so the shutter stays visually centered */}
+          <div className="w-full flex items-center justify-between px-3">
+            <div style={{ width: 44 }} />{/* balances the flip button on the right so the shutter stays truly centered */}
             <button onClick={snap} disabled={camState === "starting"}
               className="w-24 h-24 rounded-full flex items-center justify-center active:scale-90 transition-transform disabled:opacity-50"
               style={{ background: "#fff", boxShadow: "0 0 0 6px #FBD0E2, 0 8px 24px -4px #F3B6D055" }}>
@@ -2298,7 +2312,7 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
               <button onClick={flipCamera} aria-label="switch camera"
                 className="rounded-full flex items-center justify-center active:scale-90 transition-transform"
                 style={{ width: 44, height: 44, background: "#F4EEF5" }}>
-                <RotateCcw size={20} color="#8A7FA0" />
+                <RefreshCw size={20} color="#8A7FA0" />
               </button>
             ) : (
               <div style={{ width: 44 }} />
