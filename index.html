@@ -1147,12 +1147,12 @@ function StockImg({ item }) {
   return <img src={src} alt={item.name} className="w-full h-full object-cover"
     onError={() => { const sb = stockImageUrl(item); if (sb && src !== sb) setSrc(sb); }} />;
 }
-function OutfitCollage({ items, pastel }) {
+function OutfitCollage({ items, pastel, height = 260 }) {
   const list = (items || []).slice(0, 5);
   const big = list.length <= 2;
   return (
     <div className="w-full rounded-3xl overflow-hidden relative flex flex-wrap items-center justify-center gap-2 p-3"
-      style={{ height: 260, background: pastel.ring + "55" }}>
+      style={{ height, background: pastel.ring + "55" }}>
       {list.map((it) => (
         <div key={it.id} className="rounded-2xl overflow-hidden bg-white shadow-sm flex items-center justify-center"
           style={{ width: big ? "46%" : "30.5%", height: big ? "88%" : "46%" }}>
@@ -1286,7 +1286,6 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
 
   const generate = () => {
     if (remaining <= 0) { goProfile && goProfile(); return; }   // guard — FAB already prevents this in the normal flow
-    onUseGeneration && onUseGeneration();
     setGenerating(true);
     setTried(true);
     setOutfits([]);
@@ -1297,6 +1296,9 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
     setTimeout(() => {
       const built = buildOutfits(closet, likedAesthetics, favorites, { tryNew: !!prefs?.tryNew, baseStyle: prefs?.baseStyle, occasion: occ, weather, feedback: prefs?.feedback });
       setOutfits(built.map((o, i) => ({ ...o, pastel: PASTELS[i % PASTELS.length] })));
+      // Cost is per OUTFIT produced (usually 5), not per click — a sparse closet
+      // that only yields 2 looks only spends 2 generations.
+      if (built.length) onUseGeneration && onUseGeneration(built.length);
       setGenerating(false);
     }, 500);
   };
@@ -2372,10 +2374,9 @@ function OnboardingCloset({ onBack, onFinish }) {
 }
 
 /* ================= PROFILE ================= */
-function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, plan, setPlan, usage, account, setAccount, onShareBonus }) {
+function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, plan, setPlan, usage, account, setAccount, onShareBonus }) {
   const ratedCount = feedback && feedback.ratings ? Object.keys(feedback.ratings).length : 0;
-  const fbA = (feedback && feedback.aesthetic) || {};
-  const loved = Object.keys(fbA).filter((a) => fbA[a] > 0).sort((a, b) => fbA[b] - fbA[a]); // styles earned from 4★+ looks
+  const loved = styleBoard || [];   // the actual looks rated STYLE_STARS+ — the mood board
   const [styleOpen, setStyleOpen] = useState(false);
   const toggle = (a) =>
     setAesthetics(aesthetics.includes(a) ? aesthetics.filter((x) => x !== a) : [...aesthetics, a]);
@@ -2513,42 +2514,35 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
         <ChevronDown size={22} color="#C99BB5" style={{ transform: styleOpen ? "rotate(180deg)" : "none", transition: "transform .25s" }} />
       </button>
 
-      {/* style board */}
+      {/* style board — a mood board of the actual looks you've rated highly */}
       {styleOpen && (
         <div className="rounded-3xl p-4 mb-6" style={{ background: "#fff", border: "1.5px solid #F1E6F1" }}>
           <p className="text-[12.5px] font-bold mb-3 flex items-start gap-1.5" style={{ color: "#A99FB5" }}>
             <Star size={13} color="#C99BB5" fill="#C99BB5" className="mt-0.5 shrink-0" />
-            <span>Rate a look {STYLE_STARS}★ or higher in the Stylist and its aesthetic joins your style automatically{ratedCount ? ` · ${ratedCount} look${ratedCount !== 1 ? "s" : ""} rated so far` : ""}.</span>
+            <span>Rate a look {STYLE_STARS}★ or higher in the Stylist and it's added to your mood board{ratedCount ? ` · ${ratedCount} look${ratedCount !== 1 ? "s" : ""} rated so far` : ""}.</span>
           </p>
 
-          <div className="text-[13px] font-black mb-2" style={{ color: "#6E6480" }}>Styles you've loved</div>
-          {loved.length ? (
-            <div className="flex flex-wrap gap-2">
-              {loved.map((a, i) => {
+          {loved.length === 0 ? (
+            <p className="text-[13px] font-semibold rounded-2xl p-3" style={{ color: "#A99FB5", background: "#FAF3FA" }}>
+              No loved looks yet — rate looks {STYLE_STARS}★ or higher in the Stylist and they'll collect here.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {loved.map((o, i) => {
                 const p = PASTELS[i % PASTELS.length];
                 return (
-                  <span key={a} className="px-4 py-2 rounded-full text-[14px] font-extrabold flex items-center gap-1.5" style={{ background: p.bg, color: p.text }}>
-                    <Star size={13} fill={p.text} color={p.text} /> {a}
-                  </span>
+                  <div key={o.id} className="rounded-3xl overflow-hidden" style={{ background: p.bg }}>
+                    <OutfitCollage items={o.items} pastel={p} height={130} />
+                    <div className="p-2.5">
+                      <div className="text-[13px] font-black leading-tight truncate" style={{ color: p.text }}>{o.title}</div>
+                      <div className="text-[10.5px] font-bold mt-0.5 flex items-center gap-1" style={{ color: p.text + "bb" }}>
+                        <Star size={10} fill={p.text} color={p.text} /> {o.rating}★ · {o.aesthetic}
+                      </div>
+                    </div>
+                  </div>
                 );
               })}
             </div>
-          ) : (
-            <p className="text-[13px] font-semibold rounded-2xl p-3" style={{ color: "#A99FB5", background: "#FAF3FA" }}>
-              No loved styles yet — rate looks {STYLE_STARS}★ or higher in the Stylist and the styles you love will collect here.
-            </p>
-          )}
-
-          {aesthetics.length > 0 && (
-            <>
-              <div className="text-[13px] font-black mt-4 mb-2" style={{ color: "#6E6480" }}>Your full style mix</div>
-              <div className="flex flex-wrap gap-2">
-                {aesthetics.map((a, i) => {
-                  const p = PASTELS[i % PASTELS.length];
-                  return <span key={a} className="px-4 py-2 rounded-full text-[14px] font-extrabold" style={{ background: p.bg, color: p.text }}>{a}</span>;
-                })}
-              </div>
-            </>
           )}
         </div>
       )}
@@ -2676,7 +2670,7 @@ function FavThumb({ img, pastel }) {
 }
 
 /* ================= ROOT ================= */
-const defaultPrefs = () => ({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback(), plan: "free", usage: null, account: null });
+const defaultPrefs = () => ({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback(), styleBoard: [], plan: "free", usage: null, account: null });
 
 function App() {
   const [hydrated, setHydrated] = useState(false);   // loaded saved state from IndexedDB yet?
@@ -2750,7 +2744,14 @@ function App() {
       if (stars >= STYLE_STARS && a && AESTHETICS.includes(a) && !aesthetics.includes(a)) {
         aesthetics = [...aesthetics, a]; promoted = true;
       }
-      return { ...p, aesthetics, feedback: { ...fb, ratings: { ...fb.ratings, [outfit.id]: stars }, aesthetic, item } };
+      // Keep an actual gallery of the looks the user loved (STYLE_STARS+), for the
+      // My Style mood board — a downgrade below the threshold removes it again.
+      const prevBoard = p.styleBoard || [];
+      const { pastel, ...cleanOutfit } = outfit;   // drop the transient render-only field
+      const styleBoard = stars >= STYLE_STARS
+        ? [{ ...cleanOutfit, rating: stars }, ...prevBoard.filter((o) => o.id !== outfit.id)].slice(0, 30)
+        : prevBoard.filter((o) => o.id !== outfit.id);
+      return { ...p, aesthetics, styleBoard, feedback: { ...fb, ratings: { ...fb.ratings, [outfit.id]: stars }, aesthetic, item } };
     });
     showToast(promoted ? `${a} added to your style ★` : "Thanks — learning your taste");
   };
@@ -2815,11 +2816,11 @@ function App() {
 
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 1800); };
 
-  // Count one generation against today's plan limit (called right before an
-  // actual "Generate Outfits" run, guarded by the caller so it only fires when
-  // there's still quota left).
-  const useGeneration = () => {
-    setPrefs((p) => { const u = getUsage(p); return { ...p, usage: { ...u, count: u.count + 1 } }; });
+  // Count generations against today's plan limit — one per OUTFIT actually
+  // produced by a "Generate Outfits" run (usually 5, fewer for a sparse closet),
+  // not one per button press.
+  const useGeneration = (n = 1) => {
+    setPrefs((p) => { const u = getUsage(p); return { ...p, usage: { ...u, count: u.count + n } }; });
   };
   // Local, honor-system referral bonus — there's no backend to confirm a friend
   // actually received the share, so this grants on a successful share action.
@@ -2886,7 +2887,7 @@ function App() {
             <CameraTab onAdd={addItem} active={tab === "camera"} initialPhoto={pendingPhoto} onConsumeInitial={() => setPendingPhoto(null)} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection} />
           </div>
           {tab === "profile" && (
-            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} account={prefs.account} setAccount={setAccount} onShareBonus={grantShareBonus} />
+            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} account={prefs.account} setAccount={setAccount} onShareBonus={grantShareBonus} />
           )}
         </div>
 
