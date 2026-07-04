@@ -45,7 +45,7 @@ import { createRoot } from "react-dom/client";
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260703150850";
+const APP_VERSION = "20260703191944";
 
 /* ---------- Theme ---------- */
 const CREAM = "#FFFCFB";
@@ -1393,114 +1393,8 @@ function OutfitCollage({ items, pastel, height = 260, bg }) {
   );
 }
 
-/* A generated-look card. Rate it 1–5★ (feeds personalization) or SWIPE it away
-   to dismiss it (a soft downvote). */
-function OutfitCard({ o, fav, rating, baseLabel, onFav, onRate, onDismiss }) {
-  const [open, setOpen] = useState(false);
-  const [dx, setDx] = useState(0);
-  const [gone, setGone] = useState(false);
-  const startX = useRef(null), cur = useRef(0), moved = useRef(false);
-  const DISMISS = 110;
-
-  const down = (e) => { startX.current = e.clientX; cur.current = 0; moved.current = false; };
-  const mv = (e) => {
-    if (startX.current == null) return;
-    const d = e.clientX - startX.current;
-    // Capture the pointer only once a real drag starts — otherwise the card would
-    // swallow taps and the star buttons (and heart) would never register a click.
-    if (!moved.current && Math.abs(d) > 6) { moved.current = true; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} }
-    cur.current = d; setDx(d);
-  };
-  const up = () => {
-    if (startX.current == null) return; startX.current = null;
-    if (Math.abs(cur.current) > DISMISS) {
-      const dir = cur.current < 0 ? -1 : 1;
-      setGone(true); setDx(dir * 600);
-      setTimeout(() => onDismiss(o), 220);
-    } else { setDx(0); }
-  };
-  const dragging = startX.current != null;
-  const opacity = gone ? 0 : Math.max(0.4, 1 - Math.abs(dx) / 320);
-
-  return (
-    <div style={{ transform: `translateX(${dx}px)`, opacity, touchAction: "pan-y",
-      transition: dragging ? "none" : "transform .25s ease, opacity .25s ease" }}
-      onPointerDown={down} onPointerMove={mv} onPointerUp={up} onPointerCancel={up}>
-      <div className="rounded-3xl p-4 relative" style={{ background: o.pastel.bg }}>
-        {moved.current && Math.abs(dx) > 28 && (
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 text-[11px] font-extrabold px-3 py-1 rounded-full shadow-sm"
-            style={{ background: "#fff", color: o.pastel.text }}>
-            {Math.abs(dx) > DISMISS ? "Release to remove" : "Swipe further to remove"}
-          </div>
-        )}
-        <OutfitCollage items={o.items} pastel={o.pastel} />
-        <div className="flex items-center justify-between mt-3 gap-2">
-          <h3 className="text-[17px] font-black" style={{ color: o.pastel.text }}>{o.title}</h3>
-          <button onClick={() => onFav(o)}
-            className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0"
-            style={{ background: fav ? o.pastel.ring : "#ffffffcc" }}>
-            <Heart size={18} color={o.pastel.text} fill={fav ? o.pastel.text : "none"} />
-          </button>
-        </div>
-        <div className="mt-1.5">
-          <span className="inline-flex items-center gap-1 text-[11px] font-extrabold px-2.5 py-1 rounded-full" style={{ background: "#ffffffaa", color: o.pastel.text }}>
-            {o.familiar ? <><Heart size={11} /> For your vibe · {o.aesthetic}</> : <><Sparkles size={11} /> Try something new · {o.aesthetic}</>}
-          </span>
-        </div>
-
-        {/* rating — teaches the app your taste */}
-        <div className="mt-3 rounded-2xl px-3.5 py-2.5" style={{ background: "#ffffffcc" }}>
-          <div className="text-[11.5px] font-extrabold mb-1.5" style={{ color: o.pastel.text }}>
-            {rating
-              ? (rating >= STYLE_STARS ? "★ Loved — added to your style" : "Thanks — personalizing your looks")
-              : "Rate this look to personalize your style"}
-          </div>
-          <div className="flex items-center gap-1.5">
-            {[1, 2, 3, 4, 5].map((s) => (
-              <button key={s} onClick={(e) => { e.stopPropagation(); onRate(o, s); }}
-                className="active:scale-90 transition-transform" aria-label={"rate " + s + " stars"}>
-                <Star size={28} color={o.pastel.text} fill={s <= rating ? o.pastel.text : "none"} strokeWidth={2.25} />
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* item list */}
-        <div className="mt-3 space-y-1.5">
-          {o.items.map((it, k) => (
-            <div key={k} className="flex items-center gap-2.5 px-3 py-2 rounded-2xl" style={{ background: "#ffffff99" }}>
-              <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 overflow-hidden" style={{ background: o.pastel.ring }}>
-                {it.photo
-                  ? <img src={it.photo} alt="" className="w-full h-full object-cover" />
-                  : <CatIcon category={it.category} size={15} color={o.pastel.text} />}
-              </div>
-              <span className="text-[13px] font-extrabold" style={{ color: "#5A5167" }}>{it.name}</span>
-              <span className="ml-auto text-[11px] font-bold" style={{ color: o.pastel.text }}>{it.category}</span>
-            </div>
-          ))}
-        </div>
-
-        <button onClick={() => setOpen((v) => !v)}
-          className="mt-2 w-full flex items-center justify-between px-4 py-2.5 rounded-2xl text-[13px] font-extrabold"
-          style={{ background: "#ffffffaa", color: o.pastel.text }}>
-          Stylist Note
-          <ChevronDown size={16} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .25s" }} />
-        </button>
-        <div style={{ maxHeight: open ? 220 : 0, overflow: "hidden", transition: "max-height .35s ease" }}>
-          <p className="text-[13px] font-semibold leading-relaxed px-1 pt-3" style={{ color: o.pastel.text }}>{o.note}</p>
-        </div>
-
-        <div className="text-[10.5px] font-bold mt-3 text-center" style={{ color: o.pastel.text + "99" }}>
-          ◂ swipe this card away if it's not your vibe
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* A single look from the My Style mood board, opened full-size — same visual
-   design as a generated OutfitCard (collage, title, rating, item list, note),
-   just as a static modal instead of a swipeable card. */
+/* A single look, opened full-size — same component used for a freshly generated
+   look in the Stylist tab, a My Style mood-board entry, or a favorited outfit. */
 function MoodBoardDetail({ outfit: o, pastel: p, rating, fav, onClose, onRate, onFav }) {
   const [noteOpen, setNoteOpen] = useState(false);
   return (
@@ -1578,13 +1472,14 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
   const [generating, setGenerating] = useState(false);
   const [tried, setTried] = useState(false);
   const [ratings, setRatings] = useState(() => ({ ...(prefs?.feedback?.ratings || {}) }));
+  const [detail, setDetail] = useState(null);   // the look opened full-size (same popup as My Style)
 
   const favIds = new Set(favorites.map((f) => f.id));
   const remaining = generationsRemaining(prefs);
   const dailyLimit = planByKey(prefs?.plan || "free").limit;
 
   const handleRate = (o, s) => { setRatings((r) => ({ ...r, [o.id]: s })); onRate && onRate(o, s); };
-  const handleDismiss = (o) => { setOutfits((list) => list.filter((x) => x.id !== o.id)); onDismiss && onDismiss(o); };
+  const handleDismiss = (o) => { setOutfits((list) => list.filter((x) => x.id !== o.id)); onDismiss && onDismiss(o); if (detail && detail.id === o.id) setDetail(null); };
 
   const generate = () => {
     if (remaining <= 0) { goProfile && goProfile(); return; }   // guard — FAB already prevents this in the normal flow
@@ -1681,18 +1576,42 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
         </div>
       )}
 
-      {/* Results */}
+      {/* Results — same tile design as the My Style / Favorited Outfits mood
+          boards: tap a look for the full card, tap the X to remove it. */}
       {outfits.length > 0 && (
-        <div className="mt-6 space-y-4">
-          <div className="flex items-center gap-2 flex-wrap">
+        <div className="mt-6">
+          <div className="flex items-center gap-2 flex-wrap mb-3">
             <h2 className="text-lg font-black" style={{ color: "#5A5167" }}>Your {outfits.length} look{outfits.length !== 1 ? "s" : ""}</h2>
           </div>
-          {outfits.map((o) => (
-            <OutfitCard key={o.id} o={o} fav={favIds.has(o.id)} rating={ratings[o.id] || 0}
-              baseLabel={prefs?.baseStyle === "Korean" ? "Korean" : "Cali"}
-              onFav={toggleFav} onRate={handleRate} onDismiss={handleDismiss} />
-          ))}
+          <div className="grid grid-cols-2 gap-3">
+            {outfits.map((o) => (
+              <div key={o.id} className="relative rounded-3xl overflow-hidden" style={{ background: o.pastel.bg }}>
+                <button onClick={() => setDetail(o)} className="w-full text-left active:scale-[0.97] transition-transform">
+                  <OutfitCollage items={o.items} pastel={o.pastel} height={130} bg="#fff" />
+                  <div className="p-2.5">
+                    <div className="text-[13px] font-black leading-tight truncate" style={{ color: o.pastel.text }}>{o.title}</div>
+                    <div className="text-[10.5px] font-bold mt-0.5 flex items-center gap-1" style={{ color: o.pastel.text + "bb" }}>
+                      {ratings[o.id] ? <><Star size={10} fill={o.pastel.text} color={o.pastel.text} /> {ratings[o.id]}★ · </> : null}{o.aesthetic}
+                    </div>
+                  </div>
+                </button>
+                <button onClick={() => handleDismiss(o)} aria-label="remove this look"
+                  className="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                  style={{ background: "#ffffffd0" }}>
+                  <X size={14} color={o.pastel.text} />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
+      )}
+
+      {detail && (
+        <MoodBoardDetail
+          outfit={detail} pastel={detail.pastel} onClose={() => setDetail(null)}
+          rating={ratings[detail.id] || 0}
+          fav={favIds.has(detail.id)}
+          onRate={handleRate} onFav={toggleFav} />
       )}
 
       {/* FAB */}
@@ -2700,12 +2619,13 @@ function OnboardingCloset({ onBack, onFinish }) {
 }
 
 /* ================= PROFILE ================= */
-function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, account, setAccount, onShareBonus }) {
+function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, account, setAccount, onShareBonus, onReset }) {
   const ratedCount = feedback && feedback.ratings ? Object.keys(feedback.ratings).length : 0;
   const loved = styleBoard || [];   // the actual looks rated STYLE_STARS+ — the mood board
   const [styleOpen, setStyleOpen] = useState(false);
   const [favOpen, setFavOpen] = useState(false);
   const [detail, setDetail] = useState(null);   // { outfit, pastel } — the single look opened full-size, shared by both mood boards
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const toggle = (a) =>
     setAesthetics(aesthetics.includes(a) ? aesthetics.filter((x) => x !== a) : [...aesthetics, a]);
 
@@ -3026,6 +2946,40 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
         </div>
         <ArrowRight size={20} color="#C99BB5" />
       </button>
+
+      {/* Restart — wipes everything back to a first-time-open state. */}
+      <button onClick={() => setResetConfirmOpen(true)}
+        className="w-full text-center rounded-3xl p-4 mt-10 text-[13px] font-extrabold active:scale-[0.98] transition-transform"
+        style={{ background: "#FCEDE6", color: "#CC8567" }}>
+        Restart FitCheck
+      </button>
+      <p className="text-[11.5px] font-semibold mt-2 mb-2 text-center leading-relaxed" style={{ color: "#C6BCD2" }}>
+        Erases your closet, ratings, favorites, and preferences — back to a brand-new install.
+      </p>
+
+      {resetConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "#00000066" }} onClick={() => setResetConfirmOpen(false)}>
+          <div className="w-full rounded-3xl p-6" style={{ maxWidth: 360, background: "#fff" }} onClick={(e) => e.stopPropagation()}>
+            <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center mb-4" style={{ background: "#FCEDE6" }}>
+              <RotateCcw size={24} color="#CC8567" />
+            </div>
+            <div className="text-[18px] font-black text-center mb-2" style={{ color: "#5A5167" }}>Reset all your data?</div>
+            <p className="text-[13.5px] font-semibold text-center leading-relaxed mb-5" style={{ color: "#A99FB5" }}>
+              This erases your closet, ratings, favorites, and preferences and starts FitCheck fresh, like the very first time you opened it. This can't be undone.
+            </p>
+            <div className="flex gap-2.5">
+              <button onClick={() => setResetConfirmOpen(false)}
+                className="flex-1 py-3.5 rounded-2xl font-black text-[14px]" style={{ background: "#F4EEF5", color: "#8A7FA0" }}>
+                Cancel
+              </button>
+              <button onClick={() => onReset && onReset()}
+                className="flex-1 py-3.5 rounded-2xl font-black text-[14px] text-white" style={{ background: "#D96A6A" }}>
+                Yes, Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3225,6 +3179,18 @@ function App() {
   const setPlan = (key) => setPrefs((p) => ({ ...p, plan: key }));
   const setAccount = (acct) => setPrefs((p) => ({ ...p, account: acct }));
 
+  // Restart — wipe everything (IndexedDB + the old localStorage key) and reload,
+  // so the app comes back up exactly like a brand-new install.
+  const handleReset = () => {
+    try { localStorage.removeItem(STATE_LS); } catch (e) {}
+    try {
+      const req = indexedDB.deleteDatabase("fitcheck");
+      req.onsuccess = () => location.reload();
+      req.onerror = () => location.reload();
+      req.onblocked = () => location.reload();
+    } catch (e) { location.reload(); }
+  };
+
   const addItem = (item) => {
     setCloset((c) => [item, ...c]);
     showToast(`${item.name} added to closet`);
@@ -3276,7 +3242,7 @@ function App() {
             <CameraTab onAdd={addItem} active={tab === "camera"} initialPhoto={pendingPhoto} onConsumeInitial={() => setPendingPhoto(null)} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection} />
           </div>
           {tab === "profile" && (
-            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} account={prefs.account} setAccount={setAccount} onShareBonus={grantShareBonus} />
+            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} account={prefs.account} setAccount={setAccount} onShareBonus={grantShareBonus} onReset={handleReset} />
           )}
         </div>
 
