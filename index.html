@@ -45,7 +45,7 @@ import { createRoot } from "react-dom/client";
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260706151253";
+const APP_VERSION = "20260706152910";
 
 /* ---------- Theme ---------- */
 const CREAM = "#FFFCFB";
@@ -1114,6 +1114,24 @@ const MAX_SHARE_BONUSES_PER_DAY = 4;   // caps stacking from repeated taps (20/d
 // is actually wired up.
 const BILLING_LIVE = false;
 const planByKey = (key) => PLANS.find((p) => p.key === (BILLING_LIVE ? key : "free")) || PLANS[0];
+
+/* Diagnostic breadcrumb for the phone-only "scan interrupts / tab reloads"
+   bug: localStorage survives a real page reload (React state doesn't), so we
+   stamp which stage a scan is in as it progresses. If the app ever comes back
+   up mid-scan (a crash/reload, not a normal finish), we can tell the user
+   exactly where it died — real data instead of guessing blind. */
+const SCAN_STAGE_LS = "fitcheck_last_scan_stage";
+function markScanStage(stage){ try { localStorage.setItem(SCAN_STAGE_LS, JSON.stringify({ stage, at: Date.now() })); } catch (e) {} }
+function clearScanStage(){ try { localStorage.removeItem(SCAN_STAGE_LS); } catch (e) {} }
+function takeInterruptedScan(){
+  try {
+    const raw = localStorage.getItem(SCAN_STAGE_LS);
+    localStorage.removeItem(SCAN_STAGE_LS);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return (Date.now() - parsed.at) < 10 * 60 * 1000 ? parsed : null;   // ignore anything stale (>10 min old)
+  } catch (e) { return null; }
+}
 /* Local calendar date (not UTC) — "today" should match the user's own day. */
 function todayKey(){ const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); }
 function getUsage(prefs){
@@ -2175,7 +2193,12 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
     setResults(null);
     setError(null);
     setScanning(true);
-    setStage("Getting ready…");
+    // Stamp every stage change to localStorage (survives an actual page reload,
+    // unlike React state) — if the app ever comes back up with a leftover
+    // breadcrumb here, it means the LAST scan died mid-flight instead of
+    // finishing normally, and we know exactly which step it was on.
+    const stageAndMark = (s) => { setStage(s); markScanStage(s); };
+    stageAndMark("Getting ready…");
     try {
       // Cap the photo before doing anything else with it. An uncapped
       // multi-megapixel photo (common for a full-body "picture of myself"
@@ -2188,7 +2211,7 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
       const safePhoto = await downscaleDataUrl(dataUrl, 1600).catch(() => dataUrl);
       setPhoto(safePhoto);
       const ds = await downscaleDataUrl(dataUrl, 1000);
-      const { items, annotated } = await detectGarments(ds, setStage, corrections, safePhoto);
+      const { items, annotated } = await detectGarments(ds, stageAndMark, corrections, safePhoto);
       setResults(items);
       if (annotated) setPhoto(annotated); // show the labeled boxes over the photo
       if (!items.length) setError("No items found — make sure the WHOLE item is in the frame and step back a bit. A close-up of just part of an item won't be recognized.");
@@ -2196,6 +2219,7 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
       setError((e && e.message) || "Something went wrong while scanning.");
     } finally {
       setScanning(false);
+      clearScanStage();   // finished (success or caught error) — no longer "interrupted"
     }
   };
 
@@ -3042,7 +3066,7 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
       {/* Restart — wipes everything back to a first-time-open state. */}
       <button onClick={() => setResetConfirmOpen(true)}
         className="w-full text-center rounded-3xl p-4 mt-10 text-[13px] font-extrabold active:scale-[0.98] transition-transform"
-        style={{ background: "#FCEDE6", color: "#CC8567" }}>
+        style={{ background: "#FAD4D4", color: "#D96A6A" }}>
         Restart FitCheck
       </button>
       <p className="text-[11.5px] font-semibold mt-2 mb-2 text-center leading-relaxed" style={{ color: "#C6BCD2" }}>
@@ -3247,6 +3271,14 @@ function App() {
 
     // Pull the real local weather (asks for location; falls back to IP).
     fetchWeather().then((w) => { if (w) setWeather(w); }).catch(() => {});
+
+    // If a scan was mid-flight last time the app closed (a crash/reload, not a
+    // normal finish — this survives a real page reload, unlike React state),
+    // let the user know what happened instead of silently losing their photo.
+    const interrupted = takeInterruptedScan();
+    if (interrupted) {
+      setTimeout(() => showToast(`Your last scan was interrupted during "${interrupted.stage}" — please try again`), 1200);
+    }
   }, []);
 
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 1800); };
