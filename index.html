@@ -45,7 +45,7 @@ import { createRoot } from "react-dom/client";
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260706130034";
+const APP_VERSION = "20260706132703";
 
 /* ---------- Theme ---------- */
 const CREAM = "#FFFCFB";
@@ -1108,7 +1108,12 @@ const PLANS = [
 ];
 const SHARE_BONUS = 5;                 // bonus generations granted per share
 const MAX_SHARE_BONUSES_PER_DAY = 4;   // caps stacking from repeated taps (20/day max)
-const planByKey = (key) => PLANS.find((p) => p.key === key) || PLANS[0];
+// No real payment processing exists yet — every user is hard-locked to the free
+// Starter Pack limit no matter what's stored in prefs.plan, so nobody can just
+// tap a paid tier and get more generations for free. Flip to true once billing
+// is actually wired up.
+const BILLING_LIVE = false;
+const planByKey = (key) => PLANS.find((p) => p.key === (BILLING_LIVE ? key : "free")) || PLANS[0];
 /* Local calendar date (not UTC) — "today" should match the user's own day. */
 function todayKey(){ const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); }
 function getUsage(prefs){
@@ -1465,6 +1470,78 @@ function MoodBoardDetail({ outfit: o, pastel: p, rating, fav, onClose, onRate, o
   );
 }
 
+/* A freshly generated look, shown in full right in the Stylist scroll — the
+   same visual design as the enlarged mood-board card (white behind the
+   collage, rating panel, item list, stylist note), just inline instead of a
+   popup. Tap the X to remove a look you don't want. */
+function StylistOutfitCard({ o, pastel: p, rating, fav, onRate, onFav, onDismiss }) {
+  const [noteOpen, setNoteOpen] = useState(false);
+  return (
+    <div className="rounded-3xl p-4 relative" style={{ background: p.bg }}>
+      <button onClick={() => onDismiss(o)} aria-label="remove this look"
+        className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+        style={{ background: "#ffffffd0" }}>
+        <X size={16} color={p.text} />
+      </button>
+      <OutfitCollage items={o.items} pastel={p} bg="#fff" />
+      <div className="flex items-center justify-between mt-3 gap-2">
+        <h3 className="text-[17px] font-black pr-8" style={{ color: p.text }}>{o.title}</h3>
+        <button onClick={() => onFav(o)}
+          className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0"
+          style={{ background: fav ? p.ring : "#ffffffcc" }}>
+          <Heart size={18} color={p.text} fill={fav ? p.text : "none"} />
+        </button>
+      </div>
+      <div className="mt-1.5">
+        <span className="inline-flex items-center gap-1 text-[11px] font-extrabold px-2.5 py-1 rounded-full" style={{ background: "#ffffffaa", color: p.text }}>
+          {o.familiar ? <><Heart size={11} /> For your vibe · {o.aesthetic}</> : <><Sparkles size={11} /> Try something new · {o.aesthetic}</>}
+        </span>
+      </div>
+
+      {/* rating — teaches the app your taste */}
+      <div className="mt-3 rounded-2xl px-3.5 py-2.5" style={{ background: "#ffffffcc" }}>
+        <div className="text-[11.5px] font-extrabold mb-1.5" style={{ color: p.text }}>
+          {rating
+            ? (rating >= STYLE_STARS ? "★ Loved — added to your style" : "Thanks — personalizing your looks")
+            : "Rate this look to personalize your style"}
+        </div>
+        <div className="flex items-center gap-1.5">
+          {[1, 2, 3, 4, 5].map((s) => (
+            <button key={s} onClick={() => onRate(o, s)} className="active:scale-90 transition-transform" aria-label={"rate " + s + " stars"}>
+              <Star size={28} color={p.text} fill={s <= rating ? p.text : "none"} strokeWidth={2.25} />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* item list */}
+      <div className="mt-3 space-y-1.5">
+        {o.items.map((it, k) => (
+          <div key={k} className="flex items-center gap-2.5 px-3 py-2 rounded-2xl" style={{ background: "#ffffff99" }}>
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 overflow-hidden" style={{ background: p.ring }}>
+              {it.photo
+                ? <img src={it.photo} alt="" className="w-full h-full object-cover" />
+                : <CatIcon category={it.category} size={15} color={p.text} />}
+            </div>
+            <span className="text-[13px] font-extrabold" style={{ color: "#5A5167" }}>{it.name}</span>
+            <span className="ml-auto text-[11px] font-bold" style={{ color: p.text }}>{it.category}</span>
+          </div>
+        ))}
+      </div>
+
+      <button onClick={() => setNoteOpen((v) => !v)}
+        className="mt-2 w-full flex items-center justify-between px-4 py-2.5 rounded-2xl text-[13px] font-extrabold"
+        style={{ background: "#ffffffaa", color: p.text }}>
+        Stylist Note
+        <ChevronDown size={16} style={{ transform: noteOpen ? "rotate(180deg)" : "none", transition: "transform .25s" }} />
+      </button>
+      <div style={{ maxHeight: noteOpen ? 220 : 0, overflow: "hidden", transition: "max-height .35s ease" }}>
+        <p className="text-[13px] font-semibold leading-relaxed px-1 pt-3" style={{ color: p.text }}>{o.note}</p>
+      </div>
+    </div>
+  );
+}
+
 function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDismiss, onUseGeneration, goProfile }) {
   const [occasion, setOccasion] = useState("");
   const [custom, setCustom] = useState("");
@@ -1472,14 +1549,13 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
   const [generating, setGenerating] = useState(false);
   const [tried, setTried] = useState(false);
   const [ratings, setRatings] = useState(() => ({ ...(prefs?.feedback?.ratings || {}) }));
-  const [detail, setDetail] = useState(null);   // the look opened full-size (same popup as My Style)
 
   const favIds = new Set(favorites.map((f) => f.id));
   const remaining = generationsRemaining(prefs);
   const dailyLimit = planByKey(prefs?.plan || "free").limit;
 
   const handleRate = (o, s) => { setRatings((r) => ({ ...r, [o.id]: s })); onRate && onRate(o, s); };
-  const handleDismiss = (o) => { setOutfits((list) => list.filter((x) => x.id !== o.id)); onDismiss && onDismiss(o); if (detail && detail.id === o.id) setDetail(null); };
+  const handleDismiss = (o) => { setOutfits((list) => list.filter((x) => x.id !== o.id)); onDismiss && onDismiss(o); };
 
   const generate = () => {
     if (remaining <= 0) { goProfile && goProfile(); return; }   // guard — FAB already prevents this in the normal flow
@@ -1576,42 +1652,18 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
         </div>
       )}
 
-      {/* Results — same tile design as the My Style / Favorited Outfits mood
-          boards: tap a look for the full card, tap the X to remove it. */}
+      {/* Results — each look shown in full, like the enlarged mood-board card,
+          right in the scroll (no tap needed to see the details). */}
       {outfits.length > 0 && (
-        <div className="mt-6">
-          <div className="flex items-center gap-2 flex-wrap mb-3">
+        <div className="mt-6 space-y-4">
+          <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-lg font-black" style={{ color: "#5A5167" }}>Your {outfits.length} look{outfits.length !== 1 ? "s" : ""}</h2>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            {outfits.map((o) => (
-              <div key={o.id} className="relative rounded-3xl overflow-hidden" style={{ background: o.pastel.bg }}>
-                <button onClick={() => setDetail(o)} className="w-full text-left active:scale-[0.97] transition-transform">
-                  <OutfitCollage items={o.items} pastel={o.pastel} height={130} bg="#fff" />
-                  <div className="p-2.5">
-                    <div className="text-[13px] font-black leading-tight truncate" style={{ color: o.pastel.text }}>{o.title}</div>
-                    <div className="text-[10.5px] font-bold mt-0.5 flex items-center gap-1" style={{ color: o.pastel.text + "bb" }}>
-                      {ratings[o.id] ? <><Star size={10} fill={o.pastel.text} color={o.pastel.text} /> {ratings[o.id]}★ · </> : null}{o.aesthetic}
-                    </div>
-                  </div>
-                </button>
-                <button onClick={() => handleDismiss(o)} aria-label="remove this look"
-                  className="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                  style={{ background: "#ffffffd0" }}>
-                  <X size={14} color={o.pastel.text} />
-                </button>
-              </div>
-            ))}
-          </div>
+          {outfits.map((o) => (
+            <StylistOutfitCard key={o.id} o={o} pastel={o.pastel} rating={ratings[o.id] || 0} fav={favIds.has(o.id)}
+              onRate={handleRate} onFav={toggleFav} onDismiss={handleDismiss} />
+          ))}
         </div>
-      )}
-
-      {detail && (
-        <MoodBoardDetail
-          outfit={detail} pastel={detail.pastel} onClose={() => setDetail(null)}
-          rating={ratings[detail.id] || 0}
-          fav={favIds.has(detail.id)}
-          onRate={handleRate} onFav={toggleFav} />
       )}
 
       {/* FAB */}
@@ -2123,12 +2175,13 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
       // multi-megapixel photo (common for a full-body "picture of myself"
       // upload) held alongside 3 in-browser ML models can spike memory hard
       // enough to crash the tab on a phone — losing the photo and the pending
-      // scan before you can confirm it. This one capped copy is reused for both
-      // the on-screen photo and the high-quality crop source, so the original
-      // huge image is only ever decoded once.
+      // scan before you can confirm it. Both copies are derived straight from
+      // the ORIGINAL (not chained through each other) — re-compressing an
+      // already-compressed JPEG stacks quality loss and was quietly hurting
+      // detection accuracy (shoes especially, being a smaller/harder region).
       const safePhoto = await downscaleDataUrl(dataUrl, 1600).catch(() => dataUrl);
       setPhoto(safePhoto);
-      const ds = await downscaleDataUrl(safePhoto, 1000);
+      const ds = await downscaleDataUrl(dataUrl, 1000);
       const { items, annotated } = await detectGarments(ds, setStage, corrections, safePhoto);
       setResults(items);
       if (annotated) setPhoto(annotated); // show the labeled boxes over the photo
@@ -2645,7 +2698,7 @@ function OnboardingCloset({ onBack, onFinish }) {
 }
 
 /* ================= PROFILE ================= */
-function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, account, setAccount, onShareBonus, onReset }) {
+function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, account, setAccount, onShareBonus, onReset, showToast }) {
   const ratedCount = feedback && feedback.ratings ? Object.keys(feedback.ratings).length : 0;
   const loved = styleBoard || [];   // the actual looks rated STYLE_STARS+ — the mood board
   const [styleOpen, setStyleOpen] = useState(false);
@@ -2667,7 +2720,7 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
   const removeAccount = () => { setAccount(null); setAcctName(""); setAcctEmail(""); setAcctOpen(false); };
 
   // --- My Plans (local demo — no real payment is collected) ---
-  const activePlan = plan || "free";
+  const activePlan = BILLING_LIVE ? (plan || "free") : "free";   // locked to free until billing is live, regardless of any stored plan
   const shareBonusesToday = (usage && usage.shareBonuses) || 0;
   const shareCapped = shareBonusesToday >= MAX_SHARE_BONUSES_PER_DAY;
   const handleShare = async () => {
@@ -2829,23 +2882,29 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
         )}
       </div>
 
-      {/* My Plans — demo pricing; no real payment is collected. */}
+      {/* My Plans — payment isn't wired up yet, so every account is locked to
+          Starter Pack. Paid tiers are shown (for the pitch) but disabled. */}
       <label className="text-[19px] font-black tracking-wide block mb-1" style={{ color: "#6E6480" }}>My Plans</label>
       <p className="text-[12.5px] font-semibold mb-3" style={{ color: "#B8AFC6" }}>
-        Demo only — no payment is collected. Picking a plan unlocks its daily generation limit right here.
+        {BILLING_LIVE ? "Picking a plan unlocks its daily generation limit." : "Paid plans are coming soon — for now every account is on Starter Pack."}
       </p>
       <div className="space-y-2.5 mb-4">
         {PLANS.map((p) => {
+          const locked = !BILLING_LIVE && p.key !== "free";
           const on = activePlan === p.key;
           return (
-            <button key={p.key} onClick={() => setPlan(p.key)}
-              className="w-full text-left rounded-2xl p-4 flex items-center gap-3 active:scale-[0.99] transition-transform"
-              style={{ background: on ? "#FDE9F1" : "#fff", border: on ? "2px solid #F3A7CB" : "2px solid #F1E6F1" }}>
+            <button key={p.key}
+              onClick={() => locked ? showToast("Payment isn't set up yet — you're on Starter Pack for now") : setPlan(p.key)}
+              className="w-full text-left rounded-2xl p-4 flex items-center gap-3 transition-transform"
+              style={{ background: on ? "#FDE9F1" : "#fff", border: on ? "2px solid #F3A7CB" : "2px solid #F1E6F1", opacity: locked ? 0.55 : 1 }}>
               <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: on ? "#F3A7CB" : "transparent", border: on ? "none" : "2px solid #DDD0E6" }}>
-                {on && <Check size={16} color="#fff" />}
+                {on ? <Check size={16} color="#fff" /> : locked ? <Lock size={13} color="#C6BCD2" /> : null}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[15px] font-black" style={{ color: "#5A5167" }}>{p.label}</div>
+                <div className="text-[15px] font-black flex items-center gap-1.5" style={{ color: "#5A5167" }}>
+                  {p.label}
+                  {locked && <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: "#F4EEF5", color: "#A99FB5" }}>Coming soon</span>}
+                </div>
                 <div className="text-[12.5px] font-semibold" style={{ color: "#A99FB5" }}>{p.blurb}</div>
               </div>
               <div className="text-right shrink-0">
@@ -3268,7 +3327,7 @@ function App() {
             <CameraTab onAdd={addItem} active={tab === "camera"} initialPhoto={pendingPhoto} onConsumeInitial={() => setPendingPhoto(null)} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection} />
           </div>
           {tab === "profile" && (
-            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} account={prefs.account} setAccount={setAccount} onShareBonus={grantShareBonus} onReset={handleReset} />
+            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} account={prefs.account} setAccount={setAccount} onShareBonus={grantShareBonus} onReset={handleReset} showToast={showToast} />
           )}
         </div>
 
@@ -3299,9 +3358,36 @@ function App() {
 }
 
 
+/* Safety net: a render-time error anywhere in the tree (rather than crashing to
+   a blank/broken page and possibly losing a pending scan) shows a recoverable
+   "Try Again" screen instead. */
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false }; }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error) { console.error("FitCheck render error:", error); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ fontFamily: "'Nunito', sans-serif", background: "linear-gradient(180deg,#FDF1F6,#F1F4FC)", minHeight: "100vh" }}
+          className="flex items-center justify-center px-6">
+          <div className="text-center">
+            <div className="text-[20px] font-black mb-2" style={{ color: "#5A5167" }}>Something went wrong</div>
+            <p className="text-[14px] font-semibold mb-5" style={{ color: "#A99FB5" }}>Sorry about that — your data is safe. Let's try again.</p>
+            <button onClick={() => this.setState({ hasError: false })}
+              className="px-6 py-3.5 rounded-2xl font-black text-white text-[15px]" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>
+              Try Again
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const loadingEl = document.getElementById("loading");
 if (loadingEl) loadingEl.remove();
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(<ErrorBoundary><App /></ErrorBoundary>);
 
 </script>
 </body>
