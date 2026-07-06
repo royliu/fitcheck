@@ -45,7 +45,7 @@ import { createRoot } from "react-dom/client";
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260706152910";
+const APP_VERSION = "20260706154002";
 
 /* ---------- Theme ---------- */
 const CREAM = "#FFFCFB";
@@ -426,24 +426,16 @@ function annotatePhoto(img,W,H,items){
 }
 
 /* Light unsharp-mask for crispness on the enhanced crops. */
-function sharpenCanvas(cx,w,h,k){
-  if(w<3||h<3) return;
-  const src=cx.getImageData(0,0,w,h), s=src.data;
-  const out=cx.createImageData(w,h), o=out.data; o.set(s);
-  const c=1+4*k;
-  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){
-    const i=(y*w+x)*4;
-    for(let ch=0;ch<3;ch++){
-      const v=c*s[i+ch]-k*(s[i-4+ch]+s[i+4+ch]+s[i-w*4+ch]+s[i+w*4+ch]);
-      o[i+ch]=v<0?0:v>255?255:v;
-    }
-  }
-  cx.putImageData(out,0,0);
-}
 /* "Studio-ish" garment photo: crop the box from the source, sized so the longest
    side reaches CAP px (keeps big crops at full detail, gently upscales small ones),
-   with a light tone + sharpen so it reads crisp and clean. (Real detail can't be
-   invented — this preserves and polishes what the camera captured.) */
+   with a light tone so it reads crisp and clean. (Real detail can't be invented —
+   this preserves and polishes what the camera captured.)
+   NOTE: this used to also run a manual per-pixel unsharp-mask convolution (up to
+   1,000,000 iterations, once per detected garment, fully synchronous with no
+   yield to the browser). On a phone that appears to be exactly what triggered
+   the "tab reloads mid-scan" bug — several of those back-to-back on a slow
+   mobile CPU reads as a hung page. Dropped in favor of just the (GPU-accelerated,
+   effectively free) canvas filter below. */
 function enhanceCrop(src,sx,sy,sw,sh){
   const CAP=1000;
   let scale=Math.min(CAP/Math.max(sw,sh), 2.2);      // shrink oversized crops to CAP, upscale tiny ones up to 2.2x
@@ -451,9 +443,8 @@ function enhanceCrop(src,sx,sy,sw,sh){
   const w=Math.max(1,Math.round(sw*scale)), h=Math.max(1,Math.round(sh*scale));
   const c=document.createElement("canvas"); c.width=w; c.height=h;
   const cx=c.getContext("2d"); cx.imageSmoothingEnabled=true; cx.imageSmoothingQuality="high";
-  try{ cx.filter="saturate(1.07) contrast(1.04) brightness(1.02)"; }catch(_){}
+  try{ cx.filter="saturate(1.07) contrast(1.05) brightness(1.02)"; }catch(_){}
   cx.drawImage(src, sx,sy,sw,sh, 0,0,w,h);
-  try{ cx.filter="none"; sharpenCanvas(cx,w,h,0.16); }catch(_){}
   return c.toDataURL("image/jpeg",0.95);
 }
 
