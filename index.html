@@ -45,7 +45,7 @@ import { createRoot } from "react-dom/client";
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260706124701";
+const APP_VERSION = "20260706130034";
 
 /* ---------- Theme ---------- */
 const CREAM = "#FFFCFB";
@@ -1922,9 +1922,6 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
         <div className="space-y-3 mt-4">
           {items.length === 0 ? (
             <div className="rounded-3xl p-8 text-center" style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
-              <div className="w-14 h-14 rounded-3xl mx-auto flex items-center justify-center mb-3" style={{ background: "#ffffffcc" }}>
-                <CameraIcon size={26} color="#C56B96" />
-              </div>
               <div className="text-[15px] font-black" style={{ color: "#5A5167" }}>No {title.toLowerCase()} yet</div>
               <p className="text-[13px] font-semibold mt-1" style={{ color: "#A99FB5" }}>Snap a piece below to add it here.</p>
             </div>
@@ -2117,14 +2114,22 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
   }, [initialPhoto]);
 
   const processImage = async (dataUrl) => {
-    setPhoto(dataUrl);
     setResults(null);
     setError(null);
     setScanning(true);
     setStage("Getting ready…");
     try {
-      const ds = await downscaleDataUrl(dataUrl, 1000);
-      const { items, annotated } = await detectGarments(ds, setStage, corrections, dataUrl);
+      // Cap the photo before doing anything else with it. An uncapped
+      // multi-megapixel photo (common for a full-body "picture of myself"
+      // upload) held alongside 3 in-browser ML models can spike memory hard
+      // enough to crash the tab on a phone — losing the photo and the pending
+      // scan before you can confirm it. This one capped copy is reused for both
+      // the on-screen photo and the high-quality crop source, so the original
+      // huge image is only ever decoded once.
+      const safePhoto = await downscaleDataUrl(dataUrl, 1600).catch(() => dataUrl);
+      setPhoto(safePhoto);
+      const ds = await downscaleDataUrl(safePhoto, 1000);
+      const { items, annotated } = await detectGarments(ds, setStage, corrections, safePhoto);
       setResults(items);
       if (annotated) setPhoto(annotated); // show the labeled boxes over the photo
       if (!items.length) setError("No items found — make sure the WHOLE item is in the frame and step back a bit. A close-up of just part of an item won't be recognized.");
@@ -2529,7 +2534,15 @@ function OnboardingCloset({ onBack, onFinish }) {
   const fileRef = useRef(null);
 
   const snap = () => setPhoto(capture());
-  const onFile = (e) => { const f = e.target.files && e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => setPhoto(r.result); r.readAsDataURL(f); e.target.value = ""; };
+  // Cap an uploaded photo's resolution before holding/displaying it — an
+  // uncapped multi-megapixel photo is unnecessary memory weight this early,
+  // before it's handed off to the Camera tab's own (also capped) scan.
+  const onFile = (e) => {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = async () => { try { setPhoto(await downscaleDataUrl(r.result, 1600)); } catch (err) { setPhoto(r.result); } };
+    r.readAsDataURL(f); e.target.value = "";
+  };
 
   return (
     <div className="px-6 pt-16 pb-10">
@@ -2658,7 +2671,7 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
   const shareBonusesToday = (usage && usage.shareBonuses) || 0;
   const shareCapped = shareBonusesToday >= MAX_SHARE_BONUSES_PER_DAY;
   const handleShare = async () => {
-    const shareData = { title: "FitCheck", text: "Check out FitCheck — an AI closet & outfit stylist!", url: "https://royliu.github.io/fitcheck/" };
+    const shareData = { title: "FitCheck", text: "Hey! I've been using this app called FitCheck to style my outfits — click this link to help give me more outfit generations! 💕", url: "https://royliu.github.io/fitcheck/" };
     try {
       if (navigator.share) await navigator.share(shareData);
       else if (navigator.clipboard) { await navigator.clipboard.writeText(shareData.url); }
