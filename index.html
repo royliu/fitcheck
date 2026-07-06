@@ -45,7 +45,7 @@ import { createRoot } from "react-dom/client";
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260706154002";
+const APP_VERSION = "20260706155740";
 
 /* ---------- Theme ---------- */
 const CREAM = "#FFFCFB";
@@ -146,14 +146,22 @@ function modelProgress(){ return 0.5 * _dlDet + 0.2 * _dlClip + 0.3 * _dlSeg; }
 function emitModelProgress(){ const p = modelProgress(); _mpSubs.forEach((f) => f(p)); }
 function onModelProgress(fn){ _mpSubs.add(fn); fn(modelProgress()); return () => _mpSubs.delete(fn); }
 
-let _ort = null, _ortSession = null;
+let _ort = null, _ortSession = null, _ortLoadPromise = null;
+/* The app warms this up silently in the background the moment it opens, AND a
+   real scan calls this too. Without a guard, taking a photo quickly (e.g. during
+   onboarding) races the background warm-up: both calls see "not loaded yet" and
+   each starts its OWN parallel 167MB download + WASM session — doubling network,
+   memory and CPU load at exactly the worst moment. This makes every caller
+   after the first just await the SAME in-flight load instead. */
 async function getDetector(onStage) {
-  if (!_ort) {
-    onStage && onStage("Loading AI model…");
-    _ort = await import("onnxruntime-web");
-    _ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
-  }
-  if (!_ortSession) {
+  if (_ortSession) return _ortSession;
+  if (_ortLoadPromise) return _ortLoadPromise;
+  _ortLoadPromise = (async () => {
+    if (!_ort) {
+      onStage && onStage("Loading AI model…");
+      _ort = await import("onnxruntime-web");
+      _ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+    }
     onStage && onStage("Loading AI model…");
     let buf = null;
     try {
@@ -181,8 +189,9 @@ async function getDetector(onStage) {
     } catch (e) { buf = null; }
     _ortSession = await _ort.InferenceSession.create(buf || DETECTOR_URL, { executionProviders: ["wasm"] });
     _dlDet = 1; emitModelProgress();
-  }
-  return _ortSession;
+    return _ortSession;
+  })();
+  try { return await _ortLoadPromise; } finally { _ortLoadPromise = null; }
 }
 
 function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
@@ -210,16 +219,21 @@ const OUTER_TYPES = new Set(["hoodie","sweatshirt","knit sweater","sweater","car
    fine with these — only dresses are restricted). Cardigans/blazers/coats are
    NOT included here since those pair fine over a dress. */
 const CASUAL_LAYER_RE = /hoodie|sweatshirt|sweater/i;
-let _clipMod=null,_clip=null;
+let _clipMod=null,_clip=null,_clipLoadPromise=null;
+// Same race guard as getDetector() — the background warm-up and an actual scan
+// can both call this before either has finished, doubling the load.
 async function getClassifier(onStage){
-  if(!_clipMod){ onStage&&onStage("Loading detail model…"); _clipMod=await import("@huggingface/transformers"); _clipMod.env.allowLocalModels=false; }
-  if(!_clip){
+  if(_clip) return _clip;
+  if(_clipLoadPromise) return _clipLoadPromise;
+  _clipLoadPromise=(async()=>{
+    if(!_clipMod){ onStage&&onStage("Loading detail model…"); _clipMod=await import("@huggingface/transformers"); _clipMod.env.allowLocalModels=false; }
     _clip=await _clipMod.pipeline("zero-shot-image-classification","Xenova/clip-vit-base-patch32",{
       progress_callback:(x)=>{ if(x&&x.status==="progress"&&x.total){ _dlClip=Math.min(1,(x.loaded||0)/x.total); emitModelProgress(); } },
     });
     _dlClip=1; emitModelProgress();
-  }
-  return _clip;
+    return _clip;
+  })();
+  try{ return await _clipLoadPromise; } finally { _clipLoadPromise=null; }
 }
 function titleCase(s){ return s.replace(/\b\w/g,c=>c.toUpperCase()); }
 /* Refine each item's noun into a detailed garment type. Best-effort: keeps the
@@ -262,17 +276,21 @@ const SEG_CLASSES = {
   top:["Upper-clothes"], outer:["Upper-clothes"], bottom:["Skirt","Pants"],
   dress:["Dress"], shoes:["Left-shoe","Right-shoe"], bag:["Bag"], hat:["Hat"],
 };
-let _segMod=null,_parser=null;
+let _segMod=null,_parser=null,_segLoadPromise=null;
+// Same race guard again — see getDetector().
 async function getParser(onStage){
-  if(!_segMod){ _segMod=await import("@huggingface/transformers"); _segMod.env.allowLocalModels=false; }
-  if(!_parser){
+  if(_parser) return _parser;
+  if(_segLoadPromise) return _segLoadPromise;
+  _segLoadPromise=(async()=>{
+    if(!_segMod){ _segMod=await import("@huggingface/transformers"); _segMod.env.allowLocalModels=false; }
     onStage&&onStage("Loading photo model…");
     _parser=await _segMod.pipeline("image-segmentation","Xenova/segformer_b2_clothes",{
       progress_callback:(x)=>{ if(x&&x.status==="progress"&&x.total){ _dlSeg=Math.min(1,(x.loaded||0)/x.total); emitModelProgress(); } },
     });
     _dlSeg=1; emitModelProgress();
-  }
-  return _parser;
+    return _parser;
+  })();
+  try{ return await _segLoadPromise; } finally { _segLoadPromise=null; }
 }
 async function cutoutItems(items, sc, W, H, onStage){
   try{
