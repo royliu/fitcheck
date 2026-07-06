@@ -45,7 +45,7 @@ import { createRoot } from "react-dom/client";
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260703191944";
+const APP_VERSION = "20260706124701";
 
 /* ---------- Theme ---------- */
 const CREAM = "#FFFCFB";
@@ -2524,7 +2524,7 @@ function Onboarding({ onDone }) {
 }
 
 function OnboardingCloset({ onBack, onFinish }) {
-  const { videoRef, canvasRef, camState, startCamera, capture } = useCamera();
+  const { videoRef, canvasRef, camState, facing, startCamera, flipCamera, capture } = useCamera();
   const [photo, setPhoto] = useState(null);
   const fileRef = useRef(null);
 
@@ -2586,15 +2586,28 @@ function OnboardingCloset({ onBack, onFinish }) {
         )}
       </div>
 
-      {/* Shutter / actions */}
+      {/* Shutter / actions — flip camera sits at the far right of the row, same as
+          the main Camera tab. */}
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
       {!photo ? (
         <div className="flex flex-col items-center gap-3">
-          <button onClick={snap} disabled={camState === "starting"}
-            className="w-20 h-20 rounded-full flex items-center justify-center active:scale-90 transition-transform disabled:opacity-50"
-            style={{ background: "#fff", boxShadow: "0 0 0 5px #FBD0E2, 0 8px 24px -4px #F3B6D055" }}>
-            <CameraIcon size={30} color="#E891B5" />
-          </button>
+          <div className="w-full flex items-center justify-between px-3">
+            <div style={{ width: 44 }} />{/* balances the flip button on the right so the shutter stays truly centered */}
+            <button onClick={snap} disabled={camState === "starting"}
+              className="w-20 h-20 rounded-full flex items-center justify-center active:scale-90 transition-transform disabled:opacity-50"
+              style={{ background: "#fff", boxShadow: "0 0 0 5px #FBD0E2, 0 8px 24px -4px #F3B6D055" }}>
+              <CameraIcon size={30} color="#E891B5" />
+            </button>
+            {camState === "live" && !photo ? (
+              <button onClick={flipCamera} aria-label="switch camera"
+                className="rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                style={{ width: 44, height: 44, background: "#F4EEF5" }}>
+                <RefreshCw size={20} color="#8A7FA0" />
+              </button>
+            ) : (
+              <div style={{ width: 44 }} />
+            )}
+          </div>
           <button onClick={() => fileRef.current && fileRef.current.click()}
             className="flex items-center gap-2 px-5 py-2.5 rounded-full text-[13px] font-extrabold active:scale-95 transition-transform"
             style={{ background: "#F4EEF5", color: "#8A7FA0" }}>
