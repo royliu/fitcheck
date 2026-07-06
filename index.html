@@ -45,7 +45,7 @@ import { createRoot } from "react-dom/client";
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260706132703";
+const APP_VERSION = "20260706151253";
 
 /* ---------- Theme ---------- */
 const CREAM = "#FFFCFB";
@@ -2122,7 +2122,7 @@ function useCamera(active = true) {
 }
 
 function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections, onCorrect }) {
-  const { videoRef, canvasRef, camState, facing, startCamera, flipCamera, capture } = useCamera(active);
+  const { videoRef, canvasRef, camState, facing, startCamera, flipCamera, capture, stopStream } = useCamera(active);
   const fileRef = useRef(null);
   const [scanning, setScanning] = useState(false);
   const [stage, setStage] = useState("");
@@ -2166,6 +2166,12 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
   }, [initialPhoto]);
 
   const processImage = async (dataUrl) => {
+    // Release the camera hardware before the heavy ML work starts. On a phone,
+    // a live camera stream still decoding frames in the background WHILE the
+    // WASM models run inference appears to be exactly the combination that
+    // crashes/reloads the tab (uploading a photo — no live stream — doesn't
+    // hit this). The stream restarts automatically via retake().
+    stopStream();
     setResults(null);
     setError(null);
     setScanning(true);
@@ -2220,6 +2226,7 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
     setResults(null);
     setPhoto(null);
     setError(null);
+    startCamera();   // resume the live view — processImage() released it before scanning
   };
 
   return (
