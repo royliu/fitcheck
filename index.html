@@ -56,7 +56,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260707094911";
+const APP_VERSION = "20260707100421";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -307,9 +307,12 @@ async function refineLabels(items, onStage){
 
 /* --- garment analysis (clothes-parsing segmentation) ---
    Uses a per-garment mask to read an accurate colour (garment pixels only, no
-   skin/background bleed) and to give the detail classifier a clean view. The mask
-   is NOT used for the displayed photo — that stays a full rectangular crop so
-   nothing gets cut out where hair/arms overlap the clothes. Best-effort. */
+   skin/background bleed) and to give the detail classifier a clean view. When that
+   same mask confidently covers most of its own box (laid-flat/hung items photograph
+   very cleanly for this), it's ALSO used to show the garment cut out on a white
+   background in the closet. Worn-on-body shots — where hair/skin/other garments
+   bleed into the box — usually don't clear that bar, and just keep the plain
+   rectangular crop instead of a jagged low-confidence cutout. Best-effort. */
 const SEG_CLASSES = {
   top:["Upper-clothes"], outer:["Upper-clothes"], bottom:["Skirt","Pants"],
   dress:["Dress"], shoes:["Left-shoe","Right-shoe"], bag:["Bag"], hat:["Hat"],
@@ -377,12 +380,18 @@ async function cutoutItems(items, sc, W, H, onStage){
       // Re-name the colour from the clean garment pixels (no skin/background bleed).
       let cb=null; for(const e of cbuckets.values()){ if(!cb||e[3]>cb[3]) cb=e; }
       if(cb){ const col=classifyColor(cb[0]/cb[3],cb[1]/cb[3],cb[2]/cb[3]); if(col){ it.color=col; it.name=col+" "+it.noun; } }
-      // White-flatten the masked garment ONLY for the detail classifier. The photo
-      // SHOWN to the user stays the full rectangular crop — no holey cut-outs.
+      // White-flatten the masked garment — always used for the detail classifier's
+      // clean view.
       ox.putImageData(idata,0,0);
       const wc=document.createElement("canvas"); wc.width=ow; wc.height=oh;
       const wx=wc.getContext("2d"); wx.fillStyle="#fff"; wx.fillRect(0,0,ow,oh); wx.drawImage(oc,0,0);
-      it.clfPhoto=wc.toDataURL("image/jpeg",0.92);
+      const cutout=wc.toDataURL("image/jpeg",0.92);
+      it.clfPhoto=cutout;
+      // Only swap the photo SHOWN in the closet when the mask confidently covers
+      // most of its own box — a low-confidence mask (typical of worn-on-body
+      // shots, where hair/skin/other garments bleed into the box) looks worse
+      // cut out than left as the plain rectangular crop.
+      if(nz > ow*oh*0.35) it.photo=cutout;
     }
   }catch(e){ /* keep rectangular crops */ }
 }
@@ -1145,7 +1154,12 @@ const MAX_SHARE_BONUSES_PER_DAY = 4;   // caps stacking from repeated taps (20/d
 // tap a paid tier and get more generations for free. Flip to true once billing
 // is actually wired up.
 const BILLING_LIVE = false;
-const planByKey = (key) => PLANS.find((p) => p.key === (BILLING_LIVE ? key : "free")) || PLANS[0];
+// Whoever's testing/demoing the app can sign in with this account to unlock every
+// plan (including Unlimited) despite BILLING_LIVE being off — everyone else stays
+// locked to Starter Pack exactly as before.
+const UNLOCKED_TEST_EMAILS = new Set(["roy.lxy@gmail.com"]);
+const plansUnlocked = (email) => BILLING_LIVE || (!!email && UNLOCKED_TEST_EMAILS.has(email.toLowerCase()));
+const planByKey = (key, email) => PLANS.find((p) => p.key === (plansUnlocked(email) ? key : "free")) || PLANS[0];
 
 /* Diagnostic breadcrumb for the phone-only "scan interrupts / tab reloads"
    bug: localStorage survives a real page reload (React state doesn't), so we
@@ -1172,8 +1186,8 @@ function getUsage(prefs){
   if (!u || u.date !== today) return { date: today, count: 0, shareBonuses: 0 };  // rolls over at midnight
   return u;
 }
-function generationsRemaining(prefs){
-  const plan = planByKey((prefs && prefs.plan) || "free");
+function generationsRemaining(prefs, email){
+  const plan = planByKey((prefs && prefs.plan) || "free", email);
   if (plan.limit === Infinity) return Infinity;
   const u = getUsage(prefs);
   return Math.max(0, plan.limit + u.shareBonuses * SHARE_BONUS - u.count);
@@ -1629,7 +1643,7 @@ function StylistOutfitCard({ o, pastel: p, rating, fav, onRate, onFav, onDismiss
   );
 }
 
-function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDismiss, onUseGeneration, goProfile }) {
+function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDismiss, onUseGeneration, goProfile, user }) {
   const [occasion, setOccasion] = useState("");
   const [custom, setCustom] = useState("");
   const [outfits, setOutfits] = useState([]);
@@ -1638,8 +1652,8 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
   const [ratings, setRatings] = useState(() => ({ ...(prefs?.feedback?.ratings || {}) }));
 
   const favIds = new Set(favorites.map((f) => f.id));
-  const remaining = generationsRemaining(prefs);
-  const dailyLimit = planByKey(prefs?.plan || "free").limit;
+  const remaining = generationsRemaining(prefs, user?.email);
+  const dailyLimit = planByKey(prefs?.plan || "free", user?.email).limit;
 
   const handleRate = (o, s) => { setRatings((r) => ({ ...r, [o.id]: s })); onRate && onRate(o, s); };
   const handleDismiss = (o) => { setOutfits((list) => list.filter((x) => x.id !== o.id)); onDismiss && onDismiss(o); };
@@ -2824,7 +2838,8 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
   const handleGoogle = async () => { setAuthBusy(true); try { await onSignInGoogle(); } finally { setAuthBusy(false); } };
 
   // --- My Plans (local demo — no real payment is collected) ---
-  const activePlan = BILLING_LIVE ? (plan || "free") : "free";   // locked to free until billing is live, regardless of any stored plan
+  const unlocked = plansUnlocked(user?.email);
+  const activePlan = unlocked ? (plan || "free") : "free";   // locked to free until billing is live (or for a test account), regardless of any stored plan
   const shareBonusesToday = (usage && usage.shareBonuses) || 0;
   const shareCapped = shareBonusesToday >= MAX_SHARE_BONUSES_PER_DAY;
   const handleShare = async () => {
@@ -3002,11 +3017,11 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
           Starter Pack. Paid tiers are shown (for the pitch) but disabled. */}
       <label className="text-[19px] font-black tracking-wide block mb-1" style={{ color: "#6E6480" }}>My Plans</label>
       <p className="text-[12.5px] font-semibold mb-3" style={{ color: "#B8AFC6" }}>
-        {BILLING_LIVE ? "Picking a plan unlocks its daily generation limit." : "Paid plans are coming soon — for now every account is on Starter Pack."}
+        {unlocked ? "Picking a plan unlocks its daily generation limit." : "Paid plans are coming soon — for now every account is on Starter Pack."}
       </p>
       <div className="space-y-2.5 mb-4">
         {PLANS.map((p) => {
-          const locked = !BILLING_LIVE && p.key !== "free";
+          const locked = !unlocked && p.key !== "free";
           const on = activePlan === p.key;
           return (
             <button key={p.key}
@@ -3531,7 +3546,7 @@ function App() {
     <div style={{ fontFamily: "'Nunito', sans-serif", background: "linear-gradient(180deg,#FDF1F6,#F1F4FC)", minHeight: "100vh" }}>
       <div className="mx-auto relative" style={{ maxWidth: 430, minHeight: "100vh", background: "linear-gradient(180deg,#FFFCFE,#FBFAFF)" }}>
         <div className="px-5 pt-8">
-          {tab === "stylist" && <StylistTab closet={closet} favorites={favorites} toggleFav={toggleFav} prefs={prefs} weather={weather} onRate={rateOutfit} onDismiss={dismissOutfit} onUseGeneration={useGeneration} goProfile={() => setTab("profile")} />}
+          {tab === "stylist" && <StylistTab closet={closet} favorites={favorites} toggleFav={toggleFav} prefs={prefs} weather={weather} onRate={rateOutfit} onDismiss={dismissOutfit} onUseGeneration={useGeneration} goProfile={() => setTab("profile")} user={user} />}
           {tab === "closet" && (
             <ClosetTab closet={closet} setCloset={setCloset} trash={trash} setTrash={setTrash} goCamera={() => setTab("camera")} />
           )}
