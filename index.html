@@ -56,7 +56,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260706213833";
+const APP_VERSION = "20260707094911";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -115,7 +115,7 @@ const ACCESSORY_SUBCATS = [
   { key: "Socks", icon: Footprints },
 ];
 
-const AESTHETICS = ["Streetwear","Minimalist","Coquette","Dark Academia","Grunge","Soft Girl","Cottagecore","Y2K","Romantic Feminine","Angelcore","Baddie","Indie","Kawaii"];
+const AESTHETICS = ["Streetwear","Minimalist","Coquette","Dark Academia","Grunge","Cottagecore","Y2K"];
 const OCCASIONS = ["School Day","Work / Office","Business Meeting","Job Interview","Casual Hangout","Brunch","Date Night","Dinner Out","Party","Birthday Party","Night Out","Concert / Festival","Recital / Performance","Wedding","Formal Event","Graduation","Church","Vacation","Beach Day","Gym / Workout","Travel Day"];
 
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
@@ -605,16 +605,10 @@ const AESTHETIC_PHOTOS = {
   "Minimalist":"https://images.unsplash.com/photo-1485462537746-965f33f7f6a7?auto=format&fit=crop&w=600&q=70",
   "Korean Style":"https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=600&q=70",
   "Coquette":"https://images.unsplash.com/photo-1495385794356-15371f348c31?auto=format&fit=crop&w=600&q=70",
-  "Soft Girl":"https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=600&q=70",
   "Cottagecore":"https://images.unsplash.com/photo-1502716119720-b23a93e5fe1b?auto=format&fit=crop&w=600&q=70",
   "Y2K":"https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=600&q=70",
-  "Romantic Feminine":"https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&w=600&q=70",
   "Dark Academia":"https://images.unsplash.com/photo-1507680434567-5739c80be1ac?auto=format&fit=crop&w=600&q=70",
   "Streetwear":"https://images.unsplash.com/photo-1520975954732-35dd22299614?auto=format&fit=crop&w=600&q=70",
-  "Angelcore":"https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&w=600&q=70",
-  "Baddie":"https://images.unsplash.com/photo-1520975954732-35dd22299614?auto=format&fit=crop&w=600&q=70",
-  "Indie":"https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=600&q=70",
-  "Kawaii":"https://images.unsplash.com/photo-1495385794356-15371f348c31?auto=format&fit=crop&w=600&q=70",
   _default:"https://images.unsplash.com/photo-1485462537746-965f33f7f6a7?auto=format&fit=crop&w=600&q=70",
 };
 
@@ -806,11 +800,8 @@ const VIBE_WORDS_BY_AESTHETIC = {
   "Streetwear": ["Street", "Off-Duty", "Edgy"], "Minimalist": ["Minimalist", "Clean", "Simple"],
   "Coquette": ["Sweet", "Coquette", "Girly"],
   "Dark Academia": ["Academia", "Moody", "Scholarly"], "Grunge": ["Grunge", "Rebel", "Edgy"],
-  "Soft Girl": ["Soft", "Dreamy", "Sweet"], "Cottagecore": ["Cottagecore", "Whimsical", "Countryside"],
-  "Y2K": ["Y2K", "Retro", "Throwback"], "Romantic Feminine": ["Romantic", "Dreamy", "Feminine"],
-  "Angelcore": ["Angelic", "Ethereal", "Dreamy"],
-  "Baddie": ["Baddie", "Bold", "Fierce"],
-  "Indie": ["Indie", "Artsy", "Eclectic"], "Kawaii": ["Kawaii", "Playful", "Cute"],
+  "Cottagecore": ["Cottagecore", "Whimsical", "Countryside"],
+  "Y2K": ["Y2K", "Retro", "Throwback"],
 };
 function titleCaseWords(s){ return s.replace(/\w\S*/g, (t) => t.charAt(0).toUpperCase() + t.slice(1)); }
 /* Build an outfit title that actually reflects the pieces/occasion/aesthetic —
@@ -870,14 +861,8 @@ const AESTHETIC_TRAITS = {
   "Coquette":         { types:[/mini skirt|pleated skirt|camisole|ballet flat|mary jane|blouse|mini dress|cardigan|bow|lace/], colors:["Pink","Light Pink","White","Cream","Mauve","Red"] },
   "Dark Academia":    { types:[/blazer|trouser|button-up|turtleneck|loafer|wool coat|pleated skirt|knit sweater|trench|cardigan/], colors:["Brown","Black","Charcoal","Olive","Maroon","Beige","Navy","Cream"] },
   "Grunge":           { types:[/leather jacket|denim jacket|ankle boot|boot|button-up|skinny jean|cargo|hoodie|graphic/], colors:["Black","Charcoal","Gray","Maroon","Olive","Dark Green"] },
-  "Soft Girl":        { types:[/cardigan|crop top|mini skirt|hoodie|sundress|mary jane|mom jean/], colors:["Pink","Light Pink","Light Blue","Purple","Cream","White"] },
   "Cottagecore":      { types:[/midi dress|maxi dress|sundress|blouse|cardigan|wide-brim|ballet flat|pleated skirt|knit/], colors:["Cream","Beige","Green","Olive","Brown","White","Tan","Light Pink"] },
   "Y2K":              { types:[/crop top|skinny jean|mini skirt|cargo|bomber|sneaker|bucket hat|camisole|baby tee/], colors:["Pink","Light Blue","Blue","Purple","Orange","Red"] },
-  "Romantic Feminine":{ types:[/blouse|midi dress|slip dress|maxi dress|heel|ballet flat|pleated skirt|camisole|lace/], colors:["Pink","Light Pink","Mauve","Cream","White","Red","Maroon"] },
-  "Angelcore":        { types:[/slip dress|maxi dress|camisole|ballet flat|blouse|midi dress|lace/], colors:["White","Cream","Light Pink","Light Blue","Beige"] },
-  "Baddie":           { types:[/bodycon|crop top|cargo|leather jacket|heel|mini skirt|sneaker|mules/], colors:["Black","Charcoal","Red","White","Brown"] },
-  "Indie":            { types:[/mom jean|cardigan|bucket hat|sneaker|button-up|trouser|graphic|beanie/], colors:["Yellow","Green","Orange","Brown","Teal","Purple"] },
-  "Kawaii":           { types:[/crop top|mini skirt|hoodie|mary jane|mini dress|cardigan|bow/], colors:["Pink","Light Pink","Light Blue","Purple","White","Yellow"] },
 };
 function aestheticAffinity(item, aesthetic){
   const t = AESTHETIC_TRAITS[aesthetic]; if(!t) return 0;
