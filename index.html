@@ -56,7 +56,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260707122348";
+const APP_VERSION = "20260707124206";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -2862,8 +2862,7 @@ function OnboardingCloset({ onBack, onFinish }) {
 }
 
 /* ================= PROFILE ================= */
-function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, onShareBonus, onReset, showToast, user, authError, onSignInGoogle, onSignUpEmail, onSignInEmail, onSignOut, avatar, setAvatar, avatarColor, setAvatarColor }) {
-  const ratedCount = feedback && feedback.ratings ? Object.keys(feedback.ratings).length : 0;
+function ProfileTab({ aesthetics, setAesthetics, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, onShareBonus, onReset, showToast, user, authError, onSignInGoogle, onSignUpEmail, onSignInEmail, onSignOut, avatar, setAvatar, avatarColor, setAvatarColor }) {
   const loved = styleBoard || [];   // the actual looks rated STYLE_STARS+ — the mood board
   const [styleOpen, setStyleOpen] = useState(false);
   const [favOpen, setFavOpen] = useState(false);
@@ -2964,7 +2963,7 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleF
         </button>
         <h1 className="text-2xl font-black mb-1" style={{ color: "#5A5167" }}>My Style</h1>
         <p className="text-sm font-semibold mb-5" style={{ color: "#A99FB5" }}>
-          Looks you've rated {STYLE_STARS}★ or higher{ratedCount ? ` · ${ratedCount} rated so far` : ""}. Tap a look for a closer view.
+          Looks you've rated {STYLE_STARS}★ or higher{loved.length ? ` · ${loved.length} so far` : ""}. Tap a look for a closer view.
         </p>
 
         {loved.length === 0 ? (
@@ -3124,7 +3123,7 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleF
           <div className="flex-1 min-w-0">
             <div className="text-[18px] font-black" style={{ color: "#5A5167" }}>My Style</div>
             <div className="text-[13px] font-bold" style={{ color: "#A99FB5" }}>
-              {plural(closetCount, "piece")} · {plural(aesthetics.length, "aesthetic")} · {favorites.length} saved
+              {plural(loved.length, "outfit")} · {plural(aesthetics.length, "aesthetic")} · {favorites.length} saved
             </div>
           </div>
           <ArrowRight size={20} color="#C99BB5" />
@@ -3686,7 +3685,7 @@ function App() {
             <CameraTab onAdd={addItem} active={tab === "camera"} initialPhoto={pendingPhoto} onConsumeInitial={() => setPendingPhoto(null)} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection} />
           </div>
           {tab === "profile" && (
-            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} onShareBonus={grantShareBonus} onReset={handleReset} showToast={showToast}
+            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} onShareBonus={grantShareBonus} onReset={handleReset} showToast={showToast}
               user={user} authError={authError} onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} onSignOut={signOutUser} avatar={prefs.avatar} setAvatar={setAvatar} avatarColor={prefs.avatarColor} setAvatarColor={setAvatarColor} />
           )}
         </div>
