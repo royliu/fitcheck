@@ -56,7 +56,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260707100421";
+const APP_VERSION = "20260707101211";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -1148,7 +1148,7 @@ const PLANS = [
   { key:"max",  label:"Unlimited",    price:"$99.99", period:"/mo", limit:Infinity, blurb:"Unlimited generations, every day" },
 ];
 const SHARE_BONUS = 5;                 // bonus generations granted per share
-const MAX_SHARE_BONUSES_PER_DAY = 4;   // caps stacking from repeated taps (20/day max)
+const MAX_SHARE_BONUSES_PER_DAY = 3;   // caps stacking from repeated taps (15/day max)
 // No real payment processing exists yet — every user is hard-locked to the free
 // Starter Pack limit no matter what's stored in prefs.plan, so nobody can just
 // tap a paid tier and get more generations for free. Flip to true once billing
@@ -1157,7 +1157,7 @@ const BILLING_LIVE = false;
 // Whoever's testing/demoing the app can sign in with this account to unlock every
 // plan (including Unlimited) despite BILLING_LIVE being off — everyone else stays
 // locked to Starter Pack exactly as before.
-const UNLOCKED_TEST_EMAILS = new Set(["roy.lxy@gmail.com"]);
+const UNLOCKED_TEST_EMAILS = new Set(["roy.lxy@gmail.com", "olivia.liu730@gmail.com"]);
 const plansUnlocked = (email) => BILLING_LIVE || (!!email && UNLOCKED_TEST_EMAILS.has(email.toLowerCase()));
 const planByKey = (key, email) => PLANS.find((p) => p.key === (plansUnlocked(email) ? key : "free")) || PLANS[0];
 
@@ -1768,7 +1768,7 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
       )}
 
       {/* FAB */}
-      <div className="fixed left-0 right-0 flex justify-center pointer-events-none" style={{ bottom: 92, maxWidth: 430, margin: "0 auto" }}>
+      <div className="fixed left-0 right-0 flex flex-col items-center pointer-events-none" style={{ bottom: 92, maxWidth: 430, margin: "0 auto" }}>
         {remaining <= 0 ? (
           <button onClick={goProfile}
             className="pointer-events-auto flex items-center gap-2 px-7 py-4 rounded-full font-black text-white text-[15px] active:scale-95 transition-transform"
@@ -1776,12 +1776,17 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
             <Lock size={19} /> Out of generations today
           </button>
         ) : (
-          <button onClick={generate} disabled={generating}
-            className="pointer-events-auto flex items-center gap-2 px-7 py-4 rounded-full font-black text-white text-[16px] active:scale-95 transition-transform"
-            style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)", boxShadow: "0 12px 30px -6px #F3B6D0aa, 0 4px 10px #00000015" }}>
-            {generating ? <Loader2 size={22} className="animate-spin" /> : <Sparkles size={22} />}
-            {generating ? "Styling…" : "Generate Outfits"}
-          </button>
+          <>
+            <button onClick={generate} disabled={generating}
+              className="pointer-events-auto flex items-center gap-2 px-7 py-4 rounded-full font-black text-white text-[16px] active:scale-95 transition-transform"
+              style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)", boxShadow: "0 12px 30px -6px #F3B6D0aa, 0 4px 10px #00000015" }}>
+              {generating ? <Loader2 size={22} className="animate-spin" /> : <Sparkles size={22} />}
+              {generating ? "Styling…" : "Generate Outfits"}
+            </button>
+            {!generating && (
+              <div className="mt-1.5 text-[11px] font-bold text-center" style={{ color: "#A99FB5" }}>Uses up to 5 generations</div>
+            )}
+          </>
         )}
       </div>
     </div>
