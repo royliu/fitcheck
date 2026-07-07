@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260707133624";
+const APP_VERSION = "20260707164319";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -2124,17 +2124,17 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
         <p className="text-sm font-semibold mb-2" style={{ color: "#A99FB5" }}>{plural(items.length, "piece")} · swipe a card left to delete</p>
         <div className="space-y-3 mt-4">
           {items.length === 0 ? (
-            <div className="rounded-3xl p-8 text-center" style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
-              <div className="text-[15px] font-black" style={{ color: "#5A5167" }}>No {title.toLowerCase()} yet</div>
-              <p className="text-[13px] font-semibold mt-1" style={{ color: "#A99FB5" }}>Snap a piece below to add it here.</p>
+            <div className="rounded-3xl p-8 text-center" style={{ background: "#F6EEF6" }}>
+              <div className="text-[15px] font-black" style={{ color: "#A99FB5" }}>No {title.toLowerCase()} yet</div>
+              <p className="text-[13px] font-semibold mt-1" style={{ color: "#C6BCD2" }}>Snap a piece below to add it here.</p>
             </div>
           ) : (
             items.map((item) => <ClosetItemRow key={item.id} item={item} onTrash={toTrash} onToggleWash={toggleWash} onToggleFav={toggleFav} onOpen={(it) => setDetailId(it.id)} />)
           )}
         </div>
         <button onClick={goCamera}
-          className="mt-5 w-full flex items-center justify-center gap-2 py-4 rounded-2xl text-[15px] font-black border-2 border-dashed"
-          style={{ borderColor: "#E4D5E6", color: "#A99FB5", background: "#FAF3FA" }}>
+          className="mt-5 w-full flex items-center justify-center gap-2 py-4 rounded-2xl text-[15px] font-black border-2"
+          style={{ borderColor: "#DDD0F2", color: "#8E78C0", background: "#F1ECFB" }}>
           <Plus size={20} /> Add Item…
         </button>
         {detailModal}
@@ -2655,14 +2655,16 @@ function OnboardingProgress({ n }) {
     </div>
   );
 }
-function Onboarding({ onDone, onSignInGoogle, onSignUpEmail, onSignInEmail, onForgotPassword, authError, user }) {
+function Onboarding({ onDone, onAddItem, corrections, onCorrect, onSignInGoogle, onSignUpEmail, onSignInEmail, onForgotPassword, authError, user }) {
   const [step, setStep] = useState("base"); // base | aesthetic | closet | account
   const [base, setBase] = useState(null);   // "Cali" | "Korean"
   const [picked, setPicked] = useState([]);
-  const [collected, setCollected] = useState(null); // { aesthetics, baseStyle, closetPhoto } once the closet step finishes
+  const [collected, setCollected] = useState(null); // { aesthetics, baseStyle } once the closet step finishes
+  const [addedCount, setAddedCount] = useState(0);  // pieces added to the real closet during the closet step
 
   const toggle = (a) =>
     setPicked((p) => (p.includes(a) ? p.filter((x) => x !== a) : [...p, a]));
+  const handleAddItem = (item) => { onAddItem(item); setAddedCount((n) => n + 1); };
 
   return (
     <div style={{ fontFamily: "'Nunito', sans-serif", background: "linear-gradient(180deg,#FDF1F6,#F1F4FC)", minHeight: "100vh" }}>
@@ -2741,10 +2743,27 @@ function Onboarding({ onDone, onSignInGoogle, onSignUpEmail, onSignInEmail, onFo
             </div>
           </div>
         ) : step === "closet" ? (
-          <OnboardingCloset
-            onBack={() => setStep("aesthetic")}
-            onFinish={(photo) => { setCollected({ aesthetics: picked, baseStyle: base, closetPhoto: photo }); setStep("account"); }}
-          />
+          <div>
+            <div className="px-6 pt-16">
+              <OnboardingProgress n={3} />
+              <button onClick={() => setStep("aesthetic")} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-2" style={{ color: "#A99FB5" }}>
+                <ArrowLeft size={18} /> Back
+              </button>
+            </div>
+            <div className="px-6">
+              <CameraTab active onAdd={handleAddItem} corrections={corrections} onCorrect={onCorrect} />
+            </div>
+            <div className="px-6 pb-10">
+              {addedCount > 0 && (
+                <p className="text-[12.5px] font-bold text-center mb-3" style={{ color: "#6BA37C" }}>{plural(addedCount, "piece")} added to your closet ✓</p>
+              )}
+              <button onClick={() => { setCollected({ aesthetics: picked, baseStyle: base }); setStep("account"); }}
+                className="w-full py-4 rounded-full text-white font-black text-[16px] flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)" }}>
+                Continue <ArrowRight size={20} />
+              </button>
+            </div>
+          </div>
         ) : (
           <OnboardingAccount
             onBack={() => setStep("closet")}
@@ -2755,118 +2774,6 @@ function Onboarding({ onDone, onSignInGoogle, onSignUpEmail, onSignInEmail, onFo
           />
         )}
       </div>
-    </div>
-  );
-}
-
-function OnboardingCloset({ onBack, onFinish }) {
-  const { videoRef, canvasRef, camState, facing, startCamera, flipCamera, capture } = useCamera();
-  const [photo, setPhoto] = useState(null);
-  const fileRef = useRef(null);
-
-  const snap = () => setPhoto(capture());
-  // Cap an uploaded photo's resolution before holding/displaying it — an
-  // uncapped multi-megapixel photo is unnecessary memory weight this early,
-  // before it's handed off to the Camera tab's own (also capped) scan.
-  const onFile = (e) => {
-    const f = e.target.files && e.target.files[0]; if (!f) return;
-    const r = new FileReader();
-    r.onload = async () => { try { setPhoto(await downscaleDataUrl(r.result, 1600)); } catch (err) { setPhoto(r.result); } };
-    r.readAsDataURL(f); e.target.value = "";
-  };
-
-  return (
-    <div className="px-6 pt-16 pb-10">
-      <OnboardingProgress n={3} />
-
-      <button onClick={onBack} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-4" style={{ color: "#A99FB5" }}>
-        <ArrowLeft size={18} /> Back
-      </button>
-
-      <h1 className="text-[30px] leading-tight font-black mb-2" style={{ color: "#5A5167" }}>Take a picture of your clothes</h1>
-      <p className="text-[15px] font-semibold mb-6" style={{ color: "#A99FB5" }}>Lay out or hang up a few pieces — we'll pick out every item in the shot. You can add more anytime from the Camera tab.</p>
-
-      {/* Viewfinder */}
-      <div className="relative rounded-3xl overflow-hidden mb-6"
-        style={{ aspectRatio: "3/4", background: "linear-gradient(160deg,#2b2b33,#3d3a44)" }}>
-        <video ref={videoRef} playsInline muted
-          className="absolute inset-0 w-full h-full object-cover"
-          style={{ display: camState === "live" && !photo ? "block" : "none" }} />
-        {photo && <img src={photo} alt="closet" className="absolute inset-0 w-full h-full object-cover" />}
-        <canvas ref={canvasRef} className="hidden" />
-
-        {[["top-4 left-4","border-t-2 border-l-2"],["top-4 right-4","border-t-2 border-r-2"],["bottom-4 left-4","border-b-2 border-l-2"],["bottom-4 right-4","border-b-2 border-r-2"]].map(([pos,b],k)=>(
-          <div key={k} className={`absolute ${pos} ${b} w-10 h-10 rounded-md`} style={{ borderColor: "#FDE9F1" }} />
-        ))}
-
-        {!photo && (
-          <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
-            {camState === "starting" ? (
-              <div>
-                <Loader2 size={36} className="mb-2 mx-auto animate-spin text-white/80" />
-                <div className="text-white/70 font-bold text-sm">Starting camera…</div>
-              </div>
-            ) : camState === "denied" ? (
-              <div>
-                <CameraIcon size={40} className="mb-2 mx-auto text-white/70" />
-                <div className="text-white/90 font-extrabold text-sm mb-1">Camera access blocked</div>
-                <div className="text-white/60 font-semibold text-xs mb-3">Allow camera in your browser, then retry.</div>
-                <button onClick={startCamera} className="px-4 py-2 rounded-full text-[12px] font-extrabold" style={{ background: "#FBB8D2", color: "#7A3556" }}>Retry</button>
-              </div>
-            ) : camState === "unavailable" ? (
-              <div>
-                <CameraIcon size={40} className="mb-2 mx-auto text-white/70" />
-                <div className="text-white/90 font-extrabold text-sm mb-1">No camera available</div>
-                <div className="text-white/60 font-semibold text-xs">You can skip this step for now.</div>
-              </div>
-            ) : (
-              <div className="text-white/70 font-bold text-sm self-end mb-4" style={{ position: "absolute", bottom: 0 }}>Frame your clothes & tap the shutter</div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Shutter / actions — flip camera sits at the far right of the row, same as
-          the main Camera tab. */}
-      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
-      {!photo ? (
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-full flex items-center justify-between px-3">
-            <div style={{ width: 44 }} />{/* balances the flip button on the right so the shutter stays truly centered */}
-            <button onClick={snap} disabled={camState === "starting"}
-              className="w-20 h-20 rounded-full flex items-center justify-center active:scale-90 transition-transform disabled:opacity-50"
-              style={{ background: "#fff", boxShadow: "0 0 0 5px #FBD0E2, 0 8px 24px -4px #F3B6D055" }}>
-              <CameraIcon size={30} color="#E891B5" />
-            </button>
-            {camState === "live" && !photo ? (
-              <button onClick={flipCamera} aria-label="switch camera"
-                className="rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                style={{ width: 44, height: 44, background: "#F4EEF5" }}>
-                <RefreshCw size={20} color="#8A7FA0" />
-              </button>
-            ) : (
-              <div style={{ width: 44 }} />
-            )}
-          </div>
-          <button onClick={() => fileRef.current && fileRef.current.click()}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-full text-[13px] font-extrabold active:scale-95 transition-transform"
-            style={{ background: "#F4EEF5", color: "#8A7FA0" }}>
-            <Plus size={16} /> Upload a photo
-          </button>
-          <button onClick={() => onFinish(null)} className="text-[13px] font-bold" style={{ color: "#A99FB5" }}>
-            Skip for now
-          </button>
-        </div>
-      ) : (
-        <div>
-          <button onClick={() => onFinish(photo)}
-            className="w-full py-4 rounded-full text-white font-black text-[16px] flex items-center justify-center gap-2 active:scale-95 transition-transform"
-            style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>
-            <Check size={20} /> Looks good — let's go
-          </button>
-          <button onClick={() => setPhoto(null)} className="w-full py-3 mt-2 text-[13px] font-bold" style={{ color: "#C99BB5" }}>Retake</button>
-        </div>
-      )}
     </div>
   );
 }
@@ -3499,7 +3406,6 @@ function App() {
   const [onboarded, setOnboarded] = useState(false);
   const [prefs, setPrefs] = useState(defaultPrefs);
   const [tab, setTab] = useState("stylist");
-  const [pendingPhoto, setPendingPhoto] = useState(null); // onboarding photo to auto-scan
   const [weather, setWeather] = useState(null);
   const [closet, setCloset] = useState(SEED);
   const [trash, setTrash] = useState(SEED_TRASH);
@@ -3800,8 +3706,6 @@ function App() {
   const finishOnboarding = (data) => {
     setPrefs((p) => ({ ...p, ...data }));
     setOnboarded(true);
-    // If they snapped a closet photo, run it through detection right away.
-    if (data.closetPhoto) { setPendingPhoto(data.closetPhoto); setTab("camera"); }
   };
 
   if (!hydrated) {
@@ -3815,7 +3719,8 @@ function App() {
   }
 
   if (!onboarded) {
-    return <Onboarding onDone={finishOnboarding} onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} onForgotPassword={sendPasswordReset} authError={authError} user={user} />;
+    return <Onboarding onDone={finishOnboarding} onAddItem={addItem} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection}
+      onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} onForgotPassword={sendPasswordReset} authError={authError} user={user} />;
   }
 
   return (
@@ -3828,7 +3733,7 @@ function App() {
           )}
           {/* Camera stays mounted (just hidden) so a taken photo + AI loading aren't lost when you switch tabs. */}
           <div style={{ display: tab === "camera" ? "block" : "none" }}>
-            <CameraTab onAdd={addItem} active={tab === "camera"} initialPhoto={pendingPhoto} onConsumeInitial={() => setPendingPhoto(null)} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection} />
+            <CameraTab onAdd={addItem} active={tab === "camera"} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection} />
           </div>
           {tab === "profile" && (
             <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} onShareBonus={grantShareBonus} onReset={handleReset} showToast={showToast}
