@@ -49,6 +49,7 @@ import { initializeApp } from "firebase/app";
 import {
   getAuth, GoogleAuthProvider, signInWithPopup,
   createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged,
+  sendPasswordResetEmail,
 } from "firebase/auth";
 import {
   getFirestore, doc, setDoc, getDoc, deleteDoc, collection, getDocs, writeBatch, serverTimestamp,
@@ -56,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260707132716";
+const APP_VERSION = "20260707133624";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -2654,7 +2655,7 @@ function OnboardingProgress({ n }) {
     </div>
   );
 }
-function Onboarding({ onDone, onSignInGoogle, onSignUpEmail, onSignInEmail, authError, user }) {
+function Onboarding({ onDone, onSignInGoogle, onSignUpEmail, onSignInEmail, onForgotPassword, authError, user }) {
   const [step, setStep] = useState("base"); // base | aesthetic | closet | account
   const [base, setBase] = useState(null);   // "Cali" | "Korean"
   const [picked, setPicked] = useState([]);
@@ -2749,7 +2750,7 @@ function Onboarding({ onDone, onSignInGoogle, onSignUpEmail, onSignInEmail, auth
             onBack={() => setStep("closet")}
             onSkip={() => onDone(collected)}
             onDone={() => onDone(collected)}
-            onSignInGoogle={onSignInGoogle} onSignUpEmail={onSignUpEmail} onSignInEmail={onSignInEmail}
+            onSignInGoogle={onSignInGoogle} onSignUpEmail={onSignUpEmail} onSignInEmail={onSignInEmail} onForgotPassword={onForgotPassword}
             authError={authError} user={user}
           />
         )}
@@ -2870,22 +2871,34 @@ function OnboardingCloset({ onBack, onFinish }) {
   );
 }
 
-function OnboardingAccount({ onBack, onSkip, onDone, onSignInGoogle, onSignUpEmail, onSignInEmail, authError, user }) {
+function OnboardingAccount({ onBack, onSkip, onDone, onSignInGoogle, onSignUpEmail, onSignInEmail, onForgotPassword, authError, user }) {
   const [authMode, setAuthMode] = useState("signup"); // "signup" | "login"
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const [resetError, setResetError] = useState("");
 
   // Once sign-in/sign-up actually succeeds, `user` flips truthy — move on right away.
   useEffect(() => { if (user) onDone(); }, [user]);
 
+  // Logging in doesn't need the "6+ characters" hint — that's only relevant
+  // when a NEW password is being chosen at signup.
+  const passwordOk = authMode === "signup" ? authPassword.length >= 6 : authPassword.length > 0;
   const submitEmailAuth = async () => {
-    if (!authEmail.trim() || authPassword.length < 6) return;
+    if (!authEmail.trim() || !passwordOk) return;
     setAuthBusy(true);
     try { await (authMode === "signup" ? onSignUpEmail(authEmail.trim(), authPassword) : onSignInEmail(authEmail.trim(), authPassword)); }
     finally { setAuthBusy(false); }
   };
   const handleGoogle = async () => { setAuthBusy(true); try { await onSignInGoogle(); } finally { setAuthBusy(false); } };
+  const handleForgotPassword = async () => {
+    if (!authEmail.trim()) { setResetError("Enter your email above first."); return; }
+    setResetError(""); setAuthBusy(true);
+    try { await onForgotPassword(authEmail.trim()); setResetSent(true); }
+    catch (e) { setResetError("Couldn't send that — check the email and try again."); }
+    finally { setAuthBusy(false); }
+  };
 
   return (
     <div className="px-6 pt-16 pb-10">
@@ -2896,7 +2909,7 @@ function OnboardingAccount({ onBack, onSkip, onDone, onSignInGoogle, onSignUpEma
       </button>
 
       <div className="w-20 h-20 rounded-3xl mx-auto flex items-center justify-center mb-5" style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)", boxShadow: "0 12px 30px -6px #F3B6D0aa" }}>
-        <Sparkles size={36} color="#fff" />
+        <Shirt size={36} color="#fff" />
       </div>
 
       <h1 className="text-[30px] leading-tight font-black mb-2 text-center" style={{ color: "#5A5167" }}>Never lose your fit</h1>
@@ -2934,17 +2947,27 @@ function OnboardingAccount({ onBack, onSkip, onDone, onSignInGoogle, onSignUpEma
         </div>
         <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="Email" type="email" autoComplete="email"
           className="w-full rounded-2xl px-4 py-3.5 text-[14px] font-semibold outline-none mb-2" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
-        <input value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Password (6+ characters)" type="password"
+        <input value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder={authMode === "signup" ? "Password (6+ characters)" : "Password"} type="password"
           autoComplete={authMode === "signup" ? "new-password" : "current-password"}
-          className="w-full rounded-2xl px-4 py-3.5 text-[14px] font-semibold outline-none mb-3" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
-        <button onClick={submitEmailAuth} disabled={authBusy || !authEmail.trim() || authPassword.length < 6}
+          className="w-full rounded-2xl px-4 py-3.5 text-[14px] font-semibold outline-none mb-2" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
+        {authMode === "login" && (
+          resetSent ? (
+            <p className="text-[12px] font-bold text-center mb-3" style={{ color: "#6BA37C" }}>Check your email for a link to reset your password.</p>
+          ) : (
+            <button onClick={handleForgotPassword} disabled={authBusy} className="w-full text-[12px] font-bold text-right mb-3 disabled:opacity-50" style={{ color: "#8A7FA0" }}>
+              Forgot password?
+            </button>
+          )
+        )}
+        <button onClick={submitEmailAuth} disabled={authBusy || !authEmail.trim() || !passwordOk}
           className="w-full py-3.5 rounded-2xl text-white font-black text-[14px] disabled:opacity-40 mb-2" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>
           {authMode === "signup" ? "Create Account" : "Log In"}
         </button>
-        <button onClick={() => setAuthMode((m) => m === "signup" ? "login" : "signup")} className="w-full text-[12.5px] font-bold text-center" style={{ color: "#8A7FA0" }}>
+        <button onClick={() => { setAuthMode((m) => m === "signup" ? "login" : "signup"); setResetSent(false); setResetError(""); }} className="w-full text-[12.5px] font-bold text-center" style={{ color: "#8A7FA0" }}>
           {authMode === "signup" ? "Already have an account? Log in" : "New here? Create an account"}
         </button>
         {authError && <p className="text-[12px] font-bold mt-2 text-center" style={{ color: "#D96A6A" }}>{authError}</p>}
+        {resetError && <p className="text-[12px] font-bold mt-2 text-center" style={{ color: "#D96A6A" }}>{resetError}</p>}
       </div>
 
       <button onClick={onSkip} className="w-full text-[13px] font-bold text-center mt-5" style={{ color: "#A99FB5" }}>
@@ -2955,7 +2978,7 @@ function OnboardingAccount({ onBack, onSkip, onDone, onSignInGoogle, onSignUpEma
 }
 
 /* ================= PROFILE ================= */
-function ProfileTab({ aesthetics, setAesthetics, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, onShareBonus, onReset, showToast, user, authError, onSignInGoogle, onSignUpEmail, onSignInEmail, onSignOut, avatar, setAvatar, avatarColor, setAvatarColor }) {
+function ProfileTab({ aesthetics, setAesthetics, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, onShareBonus, onReset, showToast, user, authError, onSignInGoogle, onSignUpEmail, onSignInEmail, onForgotPassword, onSignOut, avatar, setAvatar, avatarColor, setAvatarColor }) {
   const loved = styleBoard || [];   // the actual looks rated STYLE_STARS+ — the mood board
   const [styleOpen, setStyleOpen] = useState(false);
   const [favOpen, setFavOpen] = useState(false);
@@ -3025,13 +3048,25 @@ function ProfileTab({ aesthetics, setAesthetics, favorites, toggleFav, tryNew, s
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const [resetError, setResetError] = useState("");
+  // Logging in doesn't need the "6+ characters" hint — that's only relevant
+  // when a NEW password is being chosen at signup.
+  const passwordOk = authMode === "signup" ? authPassword.length >= 6 : authPassword.length > 0;
   const submitEmailAuth = async () => {
-    if (!authEmail.trim() || authPassword.length < 6) return;
+    if (!authEmail.trim() || !passwordOk) return;
     setAuthBusy(true);
     try { await (authMode === "signup" ? onSignUpEmail(authEmail.trim(), authPassword) : onSignInEmail(authEmail.trim(), authPassword)); }
     finally { setAuthBusy(false); }
   };
   const handleGoogle = async () => { setAuthBusy(true); try { await onSignInGoogle(); } finally { setAuthBusy(false); } };
+  const handleForgotPassword = async () => {
+    if (!authEmail.trim()) { setResetError("Enter your email above first."); return; }
+    setResetError(""); setAuthBusy(true);
+    try { await onForgotPassword(authEmail.trim()); setResetSent(true); }
+    catch (e) { setResetError("Couldn't send that — check the email and try again."); }
+    finally { setAuthBusy(false); }
+  };
 
   // --- My Plans (local demo — no real payment is collected) ---
   const unlocked = plansUnlocked(user?.email);
@@ -3192,17 +3227,27 @@ function ProfileTab({ aesthetics, setAesthetics, favorites, toggleFav, tryNew, s
               </div>
               <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="Email" type="email" autoComplete="email"
                 className="w-full rounded-2xl px-4 py-3 text-[14px] font-semibold outline-none mb-2" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
-              <input value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Password (6+ characters)" type="password"
+              <input value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder={authMode === "signup" ? "Password (6+ characters)" : "Password"} type="password"
                 autoComplete={authMode === "signup" ? "new-password" : "current-password"}
-                className="w-full rounded-2xl px-4 py-3 text-[14px] font-semibold outline-none mb-3" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
-              <button onClick={submitEmailAuth} disabled={authBusy || !authEmail.trim() || authPassword.length < 6}
+                className="w-full rounded-2xl px-4 py-3 text-[14px] font-semibold outline-none mb-2" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
+              {authMode === "login" && (
+                resetSent ? (
+                  <p className="text-[12px] font-bold text-center mb-3" style={{ color: "#6BA37C" }}>Check your email for a link to reset your password.</p>
+                ) : (
+                  <button onClick={handleForgotPassword} disabled={authBusy} className="w-full text-[12px] font-bold text-right mb-3 disabled:opacity-50" style={{ color: "#8A7FA0" }}>
+                    Forgot password?
+                  </button>
+                )
+              )}
+              <button onClick={submitEmailAuth} disabled={authBusy || !authEmail.trim() || !passwordOk}
                 className="w-full py-3 rounded-2xl text-white font-black text-[13px] disabled:opacity-40" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>
                 {authMode === "signup" ? "Create Account" : "Log In"}
               </button>
-              <button onClick={() => setAuthMode((m) => m === "signup" ? "login" : "signup")} className="w-full mt-2.5 text-[12.5px] font-bold text-center" style={{ color: "#8A7FA0" }}>
+              <button onClick={() => { setAuthMode((m) => m === "signup" ? "login" : "signup"); setResetSent(false); setResetError(""); }} className="w-full mt-2.5 text-[12.5px] font-bold text-center" style={{ color: "#8A7FA0" }}>
                 {authMode === "signup" ? "Already have an account? Log in" : "New here? Create an account"}
               </button>
               {authError && <p className="text-[12px] font-bold mt-2.5 text-center" style={{ color: "#D96A6A" }}>{authError}</p>}
+              {resetError && <p className="text-[12px] font-bold mt-2.5 text-center" style={{ color: "#D96A6A" }}>{resetError}</p>}
             </div>
           )}
         </div>
@@ -3585,6 +3630,14 @@ function App() {
     catch (e) { setAuthError(friendlyAuthError(e)); }
   };
   const signOutUser = async () => { try { await signOut(auth); } catch (e) {} };
+  // Firebase's native flow: an emailed reset LINK, not a code — there's no
+  // backend here to generate/verify a custom 6-digit code. Silently swallow
+  // "no account for this email" so the response doesn't reveal whether an
+  // email is registered (standard practice against account enumeration).
+  const sendPasswordReset = async (email) => {
+    try { await sendPasswordResetEmail(auth, email); }
+    catch (e) { if (!e || e.code !== "auth/user-not-found") throw e; }
+  };
 
   // Persist wardrobe + learning whenever they change (after the initial load, so
   // we never overwrite saved data with the starting defaults).
@@ -3762,7 +3815,7 @@ function App() {
   }
 
   if (!onboarded) {
-    return <Onboarding onDone={finishOnboarding} onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} authError={authError} user={user} />;
+    return <Onboarding onDone={finishOnboarding} onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} onForgotPassword={sendPasswordReset} authError={authError} user={user} />;
   }
 
   return (
@@ -3779,7 +3832,7 @@ function App() {
           </div>
           {tab === "profile" && (
             <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} onShareBonus={grantShareBonus} onReset={handleReset} showToast={showToast}
-              user={user} authError={authError} onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} onSignOut={signOutUser} avatar={prefs.avatar} setAvatar={setAvatar} avatarColor={prefs.avatarColor} setAvatarColor={setAvatarColor} />
+              user={user} authError={authError} onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} onForgotPassword={sendPasswordReset} onSignOut={signOutUser} avatar={prefs.avatar} setAvatar={setAvatar} avatarColor={prefs.avatarColor} setAvatarColor={setAvatarColor} />
           )}
         </div>
 
