@@ -56,7 +56,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260707114902";
+const APP_VERSION = "20260707120755";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -107,6 +107,14 @@ const PROFILE_AVATARS = [
   { id: "cherry",   emoji: "🍒" }, { id: "swan",    emoji: "🦢" },
 ];
 const avatarFor = (id) => PROFILE_AVATARS.find((a) => a.id === id) || null;
+/* Background color for the avatar circle — a separate choice from the emoji,
+   so it survives selection instead of falling back to a flat gray. */
+const AVATAR_BG_COLORS = [
+  { id: "pink",   bg: PASTELS[0].bg }, { id: "yellow", bg: PASTELS[1].bg },
+  { id: "purple", bg: PASTELS[2].bg }, { id: "blue",   bg: PASTELS[3].bg },
+  { id: "green",  bg: PASTELS[4].bg }, { id: "orange", bg: PASTELS[5].bg },
+];
+const avatarBgFor = (id) => (AVATAR_BG_COLORS.find((c) => c.id === id) || AVATAR_BG_COLORS[0]).bg;
 
 const CATEGORIES = [
   { key: "Tops", icon: Shirt },
@@ -329,6 +337,12 @@ const SEG_CLASSES = {
   top:["Upper-clothes"], outer:["Upper-clothes"], bottom:["Skirt","Pants"],
   dress:["Dress"], shoes:["Left-shoe","Right-shoe"], bag:["Bag"], hat:["Hat"],
 };
+/* The segmentation model also labels body parts. Any meaningful presence of
+   these WITHIN a garment's own box means it's actually being worn (arms filling
+   sleeves, hair over a collar) rather than held up or laid flat — a small
+   hand-corner grip from "holding it up" doesn't trip this, but a sleeve full of
+   arm or a shoulder full of hair does. */
+const BODY_PART_CLASSES = ["Hair","Face","Left-arm","Right-arm","Left-leg","Right-leg"];
 let _segMod=null,_parser=null,_segLoadPromise=null;
 // Same race guard again — see getDetector().
 async function getParser(onStage){
@@ -357,11 +371,22 @@ async function cutoutItems(items, sc, W, H, onStage){
     const segs=await parser(pcv.toDataURL("image/jpeg",0.92));
     const masks=new Map();
     for(const s of segs){ if(s&&s.label&&s.mask&&s.mask.data) masks.set(s.label,s.mask.data); }
+    const bodyLayers=BODY_PART_CLASSES.map((c)=>masks.get(c)).filter(Boolean);
     const mW=pw, mH=ph;
+    // Two detected garments overlapping heavily (a jacket boxed over the shirt
+    // underneath, say) means whichever crop we're looking at likely has the OTHER
+    // garment bleeding into it — not a clean single-item shot.
+    const boxOverlapFrac=(a,b)=>{
+      const ix1=Math.max(a[0],b[0]), iy1=Math.max(a[1],b[1]), ix2=Math.min(a[2],b[2]), iy2=Math.min(a[3],b[3]);
+      const iw=Math.max(0,ix2-ix1), ih=Math.max(0,iy2-iy1);
+      const areaA=(a[2]-a[0])*(a[3]-a[1]);
+      return areaA>0 ? (iw*ih)/areaA : 0;
+    };
     for(const it of items){
       const cls=SEG_CLASSES[it.detLabel]; if(!cls) continue;
       const layers=cls.map((c)=>masks.get(c)).filter(Boolean);
       if(!layers.length) continue;                       // garment class not segmented → keep crop
+      const layeredWithAnother=items.some((other)=>other!==it && other.bbox && boxOverlapFrac(it.bbox,other.bbox)>0.2);
       const [x1,y1,x2,y2]=it.bbox;
       const exX=Math.round((x2-x1)*0.06), exY=Math.round((y2-y1)*0.06);
       const bx1=Math.max(0,x1-exX), by1=Math.max(0,y1-exY), bx2=Math.min(W,x2+exX), by2=Math.min(H,y2+exY);
@@ -372,7 +397,7 @@ async function cutoutItems(items, sc, W, H, onStage){
       const ox=oc.getContext("2d"); ox.imageSmoothingEnabled=true; ox.imageSmoothingQuality="high";
       ox.drawImage(sc, bx1,by1,cw,ch, 0,0,ow,oh);
       const idata=ox.getImageData(0,0,ow,oh); const px=idata.data;
-      let nz=0,minx=ow,miny=oh,maxx=0,maxy=0;
+      let nz=0,bodyPx=0,minx=ow,miny=oh,maxx=0,maxy=0;
       const cbuckets=new Map();                          // dominant garment colour (opaque pixels only)
       for(let yy=0; yy<oh; yy++){
         const sy=by1+(yy/oh)*ch; const my=Math.min(mH-1,Math.round(sy*ps));
@@ -385,6 +410,10 @@ async function cutoutItems(items, sc, W, H, onStage){
             nz++; if(xx<minx)minx=xx; if(xx>maxx)maxx=xx; if(yy<miny)miny=yy; if(yy>maxy)maxy=yy;
             const k=(px[o4]>>4)+"_"+(px[o4+1]>>4)+"_"+(px[o4+2]>>4);
             const e=cbuckets.get(k)||[0,0,0,0]; e[0]+=px[o4];e[1]+=px[o4+1];e[2]+=px[o4+2];e[3]++; cbuckets.set(k,e);
+          }
+          if(bodyLayers.length){
+            let bm=0; for(const L of bodyLayers){ const v=L[my*mW+mx]; if(v>bm)bm=v; }
+            if(bm>110) bodyPx++;                          // hair/skin/limb showing at this pixel
           }
         }
       }
@@ -399,11 +428,15 @@ async function cutoutItems(items, sc, W, H, onStage){
       const wx=wc.getContext("2d"); wx.fillStyle="#fff"; wx.fillRect(0,0,ow,oh); wx.drawImage(oc,0,0);
       const cutout=wc.toDataURL("image/jpeg",0.92);
       it.clfPhoto=cutout;
-      // Only swap the photo SHOWN in the closet when the mask confidently covers
-      // most of its own box — a low-confidence mask (typical of worn-on-body
-      // shots, where hair/skin/other garments bleed into the box) looks worse
-      // cut out than left as the plain rectangular crop.
-      if(nz > ow*oh*0.35) it.photo=cutout;
+      // Only swap the photo SHOWN in the closet when: the mask confidently covers
+      // most of its own box, there's no meaningful hair/skin/limb inside that box
+      // (worn-on-body — a small hand-corner grip from holding it up is fine, a
+      // sleeve full of arm or a collar full of hair is not), and no OTHER detected
+      // garment heavily overlaps this one's box (layered pieces, like a jacket over
+      // a shirt). Anything short of that keeps the plain rectangular crop instead
+      // of a cutout that looks jagged or shows the wrong garment's edges.
+      const wornOnBody = bodyPx > ow*oh*0.06;
+      if(nz > ow*oh*0.35 && !wornOnBody && !layeredWithAnother) it.photo=cutout;
     }
   }catch(e){ /* keep rectangular crops */ }
 }
@@ -1789,13 +1822,13 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
           </button>
         ) : (
           <button onClick={generate} disabled={generating}
-            className="pointer-events-auto flex flex-col items-center px-7 py-4 rounded-full font-black text-white active:scale-95 transition-transform"
+            className="pointer-events-auto flex items-center gap-2 px-7 py-4 rounded-full font-black text-white active:scale-95 transition-transform"
             style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)", boxShadow: "0 12px 30px -6px #F3B6D0aa, 0 4px 10px #00000015" }}>
-            <span className="flex items-center gap-2 text-[16px]">
-              {generating ? <Loader2 size={22} className="animate-spin" /> : <Sparkles size={22} />}
-              {generating ? "Styling…" : "Generate Outfits"}
+            {generating ? <Loader2 size={22} className="animate-spin" /> : <Sparkles size={22} />}
+            <span className="flex flex-col items-start">
+              <span className="text-[20px]">{generating ? "Styling…" : "Generate Outfits"}</span>
+              {!generating && <span className="text-[8px] font-bold text-white">Uses up to 5 generations</span>}
             </span>
-            {!generating && <span className="text-[11px] font-bold text-white mt-0.5">Uses up to 5 generations</span>}
           </button>
         )}
       </div>
@@ -2828,7 +2861,7 @@ function OnboardingCloset({ onBack, onFinish }) {
 }
 
 /* ================= PROFILE ================= */
-function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, onShareBonus, onReset, showToast, user, authError, onSignInGoogle, onSignUpEmail, onSignInEmail, onSignOut, avatar, setAvatar }) {
+function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, onShareBonus, onReset, showToast, user, authError, onSignInGoogle, onSignUpEmail, onSignInEmail, onSignOut, avatar, setAvatar, avatarColor, setAvatarColor }) {
   const ratedCount = feedback && feedback.ratings ? Object.keys(feedback.ratings).length : 0;
   const loved = styleBoard || [];   // the actual looks rated STYLE_STARS+ — the mood board
   const [styleOpen, setStyleOpen] = useState(false);
@@ -2841,7 +2874,10 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleF
     setAesthetics(aesthetics.includes(a) ? aesthetics.filter((x) => x !== a) : [...aesthetics, a]);
   // Avatar shown wherever the account picture appears: a custom FitCheck pick
   // wins over the Google photo, which wins over an initial-letter fallback.
+  // The picked pastel background only applies behind a custom emoji pick — a
+  // real Google photo or the initial-letter fallback keep a neutral backdrop.
   const avatarChoice = avatarFor(avatar);
+  const avatarBg = avatarChoice ? avatarBgFor(avatarColor) : "#F6EEF6";
   const renderAvatar = (size) => avatarChoice
     ? <span style={{ fontSize: size * 0.52, lineHeight: 1 }}>{avatarChoice.emoji}</span>
     : user && user.photoURL
@@ -2854,21 +2890,35 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleF
       <div className="w-full rounded-t-3xl p-6" style={{ maxWidth: 430, background: "#fff" }} onClick={(e) => e.stopPropagation()}>
         <div className="text-[17px] font-black text-center mb-1" style={{ color: "#5A5167" }}>Pick your profile picture</div>
         <p className="text-[12.5px] font-semibold text-center mb-4" style={{ color: "#A99FB5" }}>Just for FitCheck — pick your favorite.</p>
-        <div className="grid grid-cols-4 gap-3 mb-4">
-          {PROFILE_AVATARS.map((a, i) => {
+        <div className="grid grid-cols-4 gap-3 mb-5">
+          {PROFILE_AVATARS.map((a) => {
             const on = avatar === a.id;
-            const p = PASTELS[i % PASTELS.length];
             return (
-              <button key={a.id} onClick={() => { setAvatar(a.id); setAvatarPickerOpen(false); }}
+              <button key={a.id} onClick={() => setAvatar(a.id)}
                 className="aspect-square rounded-full flex items-center justify-center text-[26px] active:scale-90 transition-transform"
-                style={{ background: p.bg, outline: on ? `2.5px solid ${p.text}` : "2.5px solid transparent" }}>
+                style={{ background: avatarBgFor(avatarColor), outline: on ? "2.5px solid #8E78C0" : "2.5px solid transparent" }}>
                 {a.emoji}
               </button>
             );
           })}
         </div>
+        <div className="text-[13px] font-black mb-2" style={{ color: "#6E6480" }}>Background color</div>
+        <div className="flex gap-3 justify-center mb-5">
+          {AVATAR_BG_COLORS.map((c) => {
+            const on = (avatarColor || AVATAR_BG_COLORS[0].id) === c.id;
+            return (
+              <button key={c.id} onClick={() => setAvatarColor(c.id)}
+                className="w-9 h-9 rounded-full active:scale-90 transition-transform"
+                style={{ background: c.bg, outline: on ? "2.5px solid #8E78C0" : "2.5px solid transparent" }} />
+            );
+          })}
+        </div>
+        <button onClick={() => setAvatarPickerOpen(false)}
+          className="w-full py-3.5 rounded-2xl text-white font-black text-[14px] mb-2" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>
+          Done
+        </button>
         {avatar && (
-          <button onClick={() => { setAvatar(null); setAvatarPickerOpen(false); }}
+          <button onClick={() => { setAvatar(null); setAvatarColor(null); setAvatarPickerOpen(false); }}
             className="w-full py-3 rounded-2xl text-[13px] font-extrabold" style={{ background: "#F6EEF6", color: "#8A7FA0" }}>
             Remove profile picture
           </button>
@@ -3019,7 +3069,7 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleF
 
         <div className="flex flex-col items-center mb-6">
           <button onClick={() => setAvatarPickerOpen(true)} className="relative active:scale-95 transition-transform">
-            <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center" style={{ background: "#F6EEF6" }}>
+            <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center" style={{ background: avatarBg }}>
               {renderAvatar(96)}
             </div>
             <div className="absolute bottom-0 right-0 w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "#F3A7CB", border: "2.5px solid #fff" }}>
@@ -3110,7 +3160,7 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleF
       <div className="w-full rounded-3xl p-4 mb-6 flex items-center gap-3"
         style={{ background: user ? "linear-gradient(120deg,#E6F0FB,#F1ECFB)" : "#F6EEF6" }}>
         <button onClick={() => setAvatarPickerOpen(true)}
-          className="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center shrink-0 active:scale-90 transition-transform" style={{ background: "#ffffffcc" }}>
+          className="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center shrink-0 active:scale-90 transition-transform" style={{ background: avatarBg }}>
           {renderAvatar(48)}
         </button>
         <button onClick={() => setAcctPageOpen(true)} className="flex-1 min-w-0 flex items-center gap-3 text-left active:opacity-70 transition-opacity">
@@ -3279,7 +3329,7 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleF
 }
 
 /* ================= ROOT ================= */
-const defaultPrefs = () => ({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback(), styleBoard: [], plan: "free", usage: null, account: null, avatar: null });
+const defaultPrefs = () => ({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback(), styleBoard: [], plan: "free", usage: null, account: null, avatar: null, avatarColor: null });
 
 /* Polls this SAME page's own URL (no server endpoint needed) for a newer
    APP_VERSION stamp, so a tab left open across a deploy can prompt a refresh. */
@@ -3599,6 +3649,7 @@ function App() {
   const setTryNew = (v) => setPrefs((p) => ({ ...p, tryNew: v }));
   const setBaseStyle = (v) => setPrefs((p) => ({ ...p, baseStyle: v }));
   const setAvatar = (v) => setPrefs((p) => ({ ...p, avatar: v }));
+  const setAvatarColor = (v) => setPrefs((p) => ({ ...p, avatarColor: v }));
 
   const finishOnboarding = (data) => {
     setPrefs((p) => ({ ...p, ...data }));
@@ -3635,7 +3686,7 @@ function App() {
           </div>
           {tab === "profile" && (
             <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} onShareBonus={grantShareBonus} onReset={handleReset} showToast={showToast}
-              user={user} authError={authError} onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} onSignOut={signOutUser} avatar={prefs.avatar} setAvatar={setAvatar} />
+              user={user} authError={authError} onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} onSignOut={signOutUser} avatar={prefs.avatar} setAvatar={setAvatar} avatarColor={prefs.avatarColor} setAvatarColor={setAvatarColor} />
           )}
         </div>
 
