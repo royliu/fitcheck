@@ -56,7 +56,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260707105434";
+const APP_VERSION = "20260707113750";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -95,6 +95,18 @@ const PASTELS = [
   { bg: "#E8F6EC", ring: "#CDEBD5", text: "#6BA37C" }, // soft mint
   { bg: "#FCEDE6", ring: "#FAD8C8", text: "#CC8567" }, // soft peach
 ];
+
+/* Preset FitCheck profile pictures — no photo upload/storage backend exists,
+   so pick-a-cute-avatar (like Discord/Slack default avatars) stands in for one. */
+const PROFILE_AVATARS = [
+  { id: "bloom",    emoji: "🌸" }, { id: "sparkle", emoji: "✨" },
+  { id: "butterfly",emoji: "🦋" }, { id: "crown",   emoji: "👑" },
+  { id: "berry",    emoji: "🍓" }, { id: "bow",     emoji: "🎀" },
+  { id: "star",     emoji: "🌟" }, { id: "heart",   emoji: "💖" },
+  { id: "bear",     emoji: "🧸" }, { id: "moon",    emoji: "🌙" },
+  { id: "cherry",   emoji: "🍒" }, { id: "swan",    emoji: "🦢" },
+];
+const avatarFor = (id) => PROFILE_AVATARS.find((a) => a.id === id) || null;
 
 const CATEGORIES = [
   { key: "Tops", icon: Shirt },
@@ -2816,18 +2828,29 @@ function OnboardingCloset({ onBack, onFinish }) {
 }
 
 /* ================= PROFILE ================= */
-function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, onShareBonus, onReset, showToast, user, authError, onSignInGoogle, onSignUpEmail, onSignInEmail, onSignOut }) {
+function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, onShareBonus, onReset, showToast, user, authError, onSignInGoogle, onSignUpEmail, onSignInEmail, onSignOut, avatar, setAvatar }) {
   const ratedCount = feedback && feedback.ratings ? Object.keys(feedback.ratings).length : 0;
   const loved = styleBoard || [];   // the actual looks rated STYLE_STARS+ — the mood board
   const [styleOpen, setStyleOpen] = useState(false);
   const [favOpen, setFavOpen] = useState(false);
+  const [acctPageOpen, setAcctPageOpen] = useState(false);
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const [detail, setDetail] = useState(null);   // { outfit, pastel } — the single look opened full-size, shared by both mood boards
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const toggle = (a) =>
     setAesthetics(aesthetics.includes(a) ? aesthetics.filter((x) => x !== a) : [...aesthetics, a]);
+  // Avatar shown wherever the account picture appears: a custom FitCheck pick
+  // wins over the Google photo, which wins over an initial-letter fallback.
+  const avatarChoice = avatarFor(avatar);
+  const renderAvatar = (size) => avatarChoice
+    ? <span style={{ fontSize: size * 0.52, lineHeight: 1 }}>{avatarChoice.emoji}</span>
+    : user && user.photoURL
+      ? <img src={user.photoURL} alt="" className="w-full h-full object-cover" />
+      : user
+        ? <span style={{ fontSize: size * 0.4 }}>{(user.displayName || user.email || "?").trim().charAt(0).toUpperCase()}</span>
+        : <User size={size * 0.44} color="#8A7FA0" />;
 
   // --- My Account (real Firebase sign-in — follows you to another device) ---
-  const [acctOpen, setAcctOpen] = useState(false);
   const [authMode, setAuthMode] = useState("login");   // "login" | "signup"
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -2956,65 +2979,137 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
     );
   }
 
+  // --- Account — reached by tapping the My Account row. Profile picture (tap
+  // to change), sign-in state, and My Style / Favorited Outfits as tiles in
+  // the same format as Closet's category grid. ---
+  if (acctPageOpen) {
+    return (
+      <div className="pb-28">
+        <button onClick={() => setAcctPageOpen(false)} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-4" style={{ color: "#A99FB5" }}>
+          <ArrowLeft size={18} /> Profile
+        </button>
+        <h1 className="text-2xl font-black mb-5" style={{ color: "#5A5167" }}>Account</h1>
+
+        <div className="flex flex-col items-center mb-6">
+          <button onClick={() => setAvatarPickerOpen(true)} className="relative active:scale-95 transition-transform">
+            <div className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center" style={{ background: "#F6EEF6" }}>
+              {renderAvatar(96)}
+            </div>
+            <div className="absolute bottom-0 right-0 w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "#F3A7CB", border: "2.5px solid #fff" }}>
+              <CameraIcon size={14} color="#fff" />
+            </div>
+          </button>
+
+          {user ? (
+            <>
+              <div className="text-[17px] font-black mt-3 text-center" style={{ color: "#5A5167" }}>{user.displayName || user.email}</div>
+              <div className="text-[12.5px] font-bold" style={{ color: "#A99FB5" }}>Signed in · synced to your account</div>
+              <button onClick={onSignOut} className="mt-3 px-4 py-2 rounded-xl text-[12.5px] font-extrabold" style={{ background: "#F6EEF6", color: "#8A7FA0" }}>Sign Out</button>
+            </>
+          ) : (
+            <div className="w-full mt-4 rounded-3xl p-4" style={{ background: "#F6EEF6" }}>
+              <div className="text-[14px] font-black text-center mb-1" style={{ color: "#5A5167" }}>Not signed in</div>
+              <p className="text-[12px] font-semibold text-center mb-3" style={{ color: "#A99FB5" }}>Sign in to sync your closet across devices.</p>
+              <button onClick={handleGoogle} disabled={authBusy}
+                className="w-full py-3 rounded-2xl font-black text-[14px] flex items-center justify-center gap-2 mb-3 disabled:opacity-50"
+                style={{ background: "#fff", color: "#5A5167", border: "1.5px solid #EFE3F0" }}>
+                Continue with Google
+              </button>
+              <div className="flex items-center gap-2 mb-3">
+                <div style={{ flex: 1, height: 1, background: "#ffffff99" }} />
+                <span className="text-[11px] font-bold" style={{ color: "#A99FB5" }}>or</span>
+                <div style={{ flex: 1, height: 1, background: "#ffffff99" }} />
+              </div>
+              <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="Email" type="email" autoComplete="email"
+                className="w-full rounded-2xl px-4 py-3 text-[14px] font-semibold outline-none mb-2" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
+              <input value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Password (6+ characters)" type="password"
+                autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+                className="w-full rounded-2xl px-4 py-3 text-[14px] font-semibold outline-none mb-3" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
+              <button onClick={submitEmailAuth} disabled={authBusy || !authEmail.trim() || authPassword.length < 6}
+                className="w-full py-3 rounded-2xl text-white font-black text-[13px] disabled:opacity-40" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>
+                {authMode === "signup" ? "Create Account" : "Log In"}
+              </button>
+              <button onClick={() => setAuthMode((m) => m === "signup" ? "login" : "signup")} className="w-full mt-2.5 text-[12.5px] font-bold text-center" style={{ color: "#8A7FA0" }}>
+                {authMode === "signup" ? "Already have an account? Log in" : "New here? Create an account"}
+              </button>
+              {authError && <p className="text-[12px] font-bold mt-2.5 text-center" style={{ color: "#D96A6A" }}>{authError}</p>}
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <button onClick={() => setStyleOpen(true)}
+            className="rounded-3xl p-4 text-left active:scale-95 transition-transform" style={{ background: PASTELS[0].bg, minHeight: 110 }}>
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-2" style={{ background: "#ffffffcc" }}>
+              <Star size={22} color={PASTELS[0].text} />
+            </div>
+            <div className="text-[15px] font-black" style={{ color: PASTELS[0].text }}>My Style</div>
+            <div className="text-[12px] font-bold" style={{ color: PASTELS[0].text + "bb" }}>
+              {plural(closetCount, "piece")} · {plural(aesthetics.length, "aesthetic")}
+            </div>
+          </button>
+          <button onClick={() => setFavOpen(true)}
+            className="rounded-3xl p-4 text-left active:scale-95 transition-transform" style={{ background: PASTELS[1].bg, minHeight: 110 }}>
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-2" style={{ background: "#ffffffcc" }}>
+              <Heart size={22} color={PASTELS[1].text} fill={favorites.length ? PASTELS[1].text : "none"} />
+            </div>
+            <div className="text-[15px] font-black" style={{ color: PASTELS[1].text }}>Favorited Outfits</div>
+            <div className="text-[12px] font-bold" style={{ color: PASTELS[1].text + "bb" }}>
+              {favorites.length > 0 ? `${plural(favorites.length, "look")} saved` : "None yet"}
+            </div>
+          </button>
+        </div>
+
+        {avatarPickerOpen && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: "#00000066" }} onClick={() => setAvatarPickerOpen(false)}>
+            <div className="w-full rounded-t-3xl p-6" style={{ maxWidth: 430, background: "#fff" }} onClick={(e) => e.stopPropagation()}>
+              <div className="text-[17px] font-black text-center mb-1" style={{ color: "#5A5167" }}>Pick your profile picture</div>
+              <p className="text-[12.5px] font-semibold text-center mb-4" style={{ color: "#A99FB5" }}>Just for FitCheck — pick your favorite.</p>
+              <div className="grid grid-cols-4 gap-3 mb-4">
+                {PROFILE_AVATARS.map((a, i) => {
+                  const on = avatar === a.id;
+                  const p = PASTELS[i % PASTELS.length];
+                  return (
+                    <button key={a.id} onClick={() => { setAvatar(a.id); setAvatarPickerOpen(false); }}
+                      className="aspect-square rounded-full flex items-center justify-center text-[26px] active:scale-90 transition-transform"
+                      style={{ background: p.bg, outline: on ? `2.5px solid ${p.text}` : "2.5px solid transparent" }}>
+                      {a.emoji}
+                    </button>
+                  );
+                })}
+              </div>
+              {avatar && (
+                <button onClick={() => { setAvatar(null); setAvatarPickerOpen(false); }}
+                  className="w-full py-3 rounded-2xl text-[13px] font-extrabold" style={{ background: "#F6EEF6", color: "#8A7FA0" }}>
+                  Remove profile picture
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="pb-28">
       <h1 className="text-[34px] leading-tight font-black mb-5" style={{ color: "#5A5167" }}>Profile</h1>
 
-      {/* My Account — a real account: sign in on another device and your
-          closet/ratings/favorites follow you there. */}
+      {/* My Account — tap through to the Account page for the profile
+          picture, sign-in details, and My Style / Favorited Outfits. */}
       <label className="text-[19px] font-black tracking-wide block mb-2" style={{ color: "#6E6480" }}>My Account</label>
-      <div className="rounded-3xl p-4 mb-6" style={{ background: user ? "linear-gradient(120deg,#E6F0FB,#F1ECFB)" : "#F6EEF6" }}>
-        {user ? (
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl overflow-hidden flex items-center justify-center shrink-0 font-black text-[18px]" style={{ background: "#ffffffcc", color: "#5D87A8" }}>
-              {user.photoURL ? <img src={user.photoURL} alt="" className="w-full h-full object-cover" /> : (user.displayName || user.email || "?").trim().charAt(0).toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[16px] font-black truncate" style={{ color: "#5A5167" }}>{user.displayName || user.email}</div>
-              <div className="text-[12px] font-bold" style={{ color: "#A99FB5" }}>Signed in · synced to your account</div>
-            </div>
-            <button onClick={onSignOut} className="px-3 py-2 rounded-xl text-[12px] font-extrabold shrink-0" style={{ background: "#ffffffcc", color: "#5D87A8" }}>Sign Out</button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0" style={{ background: "#ffffffcc" }}>
-              <User size={22} color="#8A7FA0" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[14px] font-black" style={{ color: "#5A5167" }}>Not signed in</div>
-              <div className="text-[12px] font-semibold" style={{ color: "#A99FB5" }}>Sign in to sync your closet across devices.</div>
-            </div>
-            <button onClick={() => setAcctOpen((o) => !o)} className="px-3.5 py-2.5 rounded-xl text-[12.5px] font-extrabold text-white shrink-0" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>Sign In</button>
-          </div>
-        )}
-        {!user && acctOpen && (
-          <div className="mt-4 pt-4" style={{ borderTop: "1.5px solid #ffffff99" }}>
-            <button onClick={handleGoogle} disabled={authBusy}
-              className="w-full py-3 rounded-2xl font-black text-[14px] flex items-center justify-center gap-2 mb-3 disabled:opacity-50"
-              style={{ background: "#fff", color: "#5A5167", border: "1.5px solid #EFE3F0" }}>
-              Continue with Google
-            </button>
-            <div className="flex items-center gap-2 mb-3">
-              <div style={{ flex: 1, height: 1, background: "#ffffff99" }} />
-              <span className="text-[11px] font-bold" style={{ color: "#A99FB5" }}>or</span>
-              <div style={{ flex: 1, height: 1, background: "#ffffff99" }} />
-            </div>
-            <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="Email" type="email" autoComplete="email"
-              className="w-full rounded-2xl px-4 py-3 text-[14px] font-semibold outline-none mb-2" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
-            <input value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Password (6+ characters)" type="password"
-              autoComplete={authMode === "signup" ? "new-password" : "current-password"}
-              className="w-full rounded-2xl px-4 py-3 text-[14px] font-semibold outline-none mb-3" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
-            <button onClick={submitEmailAuth} disabled={authBusy || !authEmail.trim() || authPassword.length < 6}
-              className="w-full py-3 rounded-2xl text-white font-black text-[13px] disabled:opacity-40" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>
-              {authMode === "signup" ? "Create Account" : "Log In"}
-            </button>
-            <button onClick={() => setAuthMode((m) => m === "signup" ? "login" : "signup")} className="w-full mt-2.5 text-[12.5px] font-bold text-center" style={{ color: "#8A7FA0" }}>
-              {authMode === "signup" ? "Already have an account? Log in" : "New here? Create an account"}
-            </button>
-            {authError && <p className="text-[12px] font-bold mt-2.5 text-center" style={{ color: "#D96A6A" }}>{authError}</p>}
-          </div>
-        )}
-      </div>
+      <button onClick={() => setAcctPageOpen(true)}
+        className="w-full text-left rounded-3xl p-4 mb-6 flex items-center gap-3 active:scale-[0.99] transition-transform"
+        style={{ background: user ? "linear-gradient(120deg,#E6F0FB,#F1ECFB)" : "#F6EEF6" }}>
+        <div className="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center shrink-0" style={{ background: "#ffffffcc" }}>
+          {renderAvatar(48)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[15px] font-black truncate" style={{ color: "#5A5167" }}>{user ? (user.displayName || user.email) : "Not signed in"}</div>
+          <div className="text-[12px] font-bold" style={{ color: "#A99FB5" }}>{user ? "Signed in · synced to your account" : "Sign in to sync your closet across devices"}</div>
+        </div>
+        <ArrowRight size={20} color="#C99BB5" />
+      </button>
 
       {/* My Plans — payment isn't wired up yet, so every account is locked to
           Starter Pack. Paid tiers are shown (for the pitch) but disabled. */}
@@ -3066,22 +3161,6 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
           <Share2 size={17} /> Share FitCheck
         </button>
       </div>
-
-      {/* My Style — opens the mood board as its own full view over Profile */}
-      <button onClick={() => setStyleOpen(true)}
-        className="w-full text-left rounded-3xl p-5 mb-6 flex items-center gap-4 active:scale-[0.99] transition-transform"
-        style={{ background: "linear-gradient(120deg,#FDE9F1,#F1ECFB)" }}>
-        <div className="w-16 h-16 rounded-2xl overflow-hidden flex items-center justify-center shrink-0" style={{ background: "#ffffffcc" }}>
-          {closetPhoto ? <img src={closetPhoto} alt="" className="w-full h-full object-cover" /> : <User size={30} color="#C56B96" />}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-[18px] font-black" style={{ color: "#5A5167" }}>My Style</div>
-          <div className="text-[13px] font-bold" style={{ color: "#A99FB5" }}>
-            {plural(closetCount, "piece")} · {plural(aesthetics.length, "aesthetic")} · {favorites.length} saved
-          </div>
-        </div>
-        <ArrowRight size={20} color="#C99BB5" />
-      </button>
 
       {/* aesthetics editor */}
       <label className="text-[19px] font-black tracking-wide block" style={{ color: "#6E6480" }}>My Aesthetics</label>
@@ -3150,22 +3229,6 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
         </button>
       </div>
 
-      {/* favorited outfits — opens as its own full mood board, same as My Style */}
-      <button onClick={() => setFavOpen(true)}
-        className="w-full text-left rounded-3xl p-5 mt-8 flex items-center gap-4 active:scale-[0.99] transition-transform"
-        style={{ background: "linear-gradient(120deg,#FDE9F1,#F1ECFB)" }}>
-        <div className="w-16 h-16 rounded-2xl flex items-center justify-center shrink-0" style={{ background: "#ffffffcc" }}>
-          <Heart size={26} color="#C56B96" fill={favorites.length ? "#C56B96" : "none"} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-[18px] font-black" style={{ color: "#5A5167" }}>Favorited Outfits</div>
-          <div className="text-[13px] font-bold" style={{ color: "#A99FB5" }}>
-            {favorites.length > 0 ? `${plural(favorites.length, "look")} saved` : "Tap the heart on a look, or rate it 5★"}
-          </div>
-        </div>
-        <ArrowRight size={20} color="#C99BB5" />
-      </button>
-
       {/* Restart — wipes everything back to a first-time-open state. */}
       <button onClick={() => setResetConfirmOpen(true)}
         className="w-full text-center rounded-3xl p-4 mt-10 text-[13px] font-extrabold active:scale-[0.98] transition-transform"
@@ -3204,7 +3267,7 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
 }
 
 /* ================= ROOT ================= */
-const defaultPrefs = () => ({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback(), styleBoard: [], plan: "free", usage: null, account: null });
+const defaultPrefs = () => ({ aesthetics: [], closetPhoto: null, baseStyle: "Cali", tryNew: false, feedback: emptyFeedback(), styleBoard: [], plan: "free", usage: null, account: null, avatar: null });
 
 /* Polls this SAME page's own URL (no server endpoint needed) for a newer
    APP_VERSION stamp, so a tab left open across a deploy can prompt a refresh. */
@@ -3523,6 +3586,7 @@ function App() {
   const setAesthetics = (next) => setPrefs((p) => ({ ...p, aesthetics: next }));
   const setTryNew = (v) => setPrefs((p) => ({ ...p, tryNew: v }));
   const setBaseStyle = (v) => setPrefs((p) => ({ ...p, baseStyle: v }));
+  const setAvatar = (v) => setPrefs((p) => ({ ...p, avatar: v }));
 
   const finishOnboarding = (data) => {
     setPrefs((p) => ({ ...p, ...data }));
@@ -3558,8 +3622,8 @@ function App() {
             <CameraTab onAdd={addItem} active={tab === "camera"} initialPhoto={pendingPhoto} onConsumeInitial={() => setPendingPhoto(null)} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection} />
           </div>
           {tab === "profile" && (
-            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} onShareBonus={grantShareBonus} onReset={handleReset} showToast={showToast}
-              user={user} authError={authError} onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} onSignOut={signOutUser} />
+            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} onShareBonus={grantShareBonus} onReset={handleReset} showToast={showToast}
+              user={user} authError={authError} onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} onSignOut={signOutUser} avatar={prefs.avatar} setAvatar={setAvatar} />
           )}
         </div>
 
