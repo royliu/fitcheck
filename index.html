@@ -56,7 +56,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260707113750";
+const APP_VERSION = "20260707114902";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -2849,6 +2849,33 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleF
       : user
         ? <span style={{ fontSize: size * 0.4 }}>{(user.displayName || user.email || "?").trim().charAt(0).toUpperCase()}</span>
         : <User size={size * 0.44} color="#8A7FA0" />;
+  const avatarPicker = avatarPickerOpen && (
+    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: "#00000066" }} onClick={() => setAvatarPickerOpen(false)}>
+      <div className="w-full rounded-t-3xl p-6" style={{ maxWidth: 430, background: "#fff" }} onClick={(e) => e.stopPropagation()}>
+        <div className="text-[17px] font-black text-center mb-1" style={{ color: "#5A5167" }}>Pick your profile picture</div>
+        <p className="text-[12.5px] font-semibold text-center mb-4" style={{ color: "#A99FB5" }}>Just for FitCheck — pick your favorite.</p>
+        <div className="grid grid-cols-4 gap-3 mb-4">
+          {PROFILE_AVATARS.map((a, i) => {
+            const on = avatar === a.id;
+            const p = PASTELS[i % PASTELS.length];
+            return (
+              <button key={a.id} onClick={() => { setAvatar(a.id); setAvatarPickerOpen(false); }}
+                className="aspect-square rounded-full flex items-center justify-center text-[26px] active:scale-90 transition-transform"
+                style={{ background: p.bg, outline: on ? `2.5px solid ${p.text}` : "2.5px solid transparent" }}>
+                {a.emoji}
+              </button>
+            );
+          })}
+        </div>
+        {avatar && (
+          <button onClick={() => { setAvatar(null); setAvatarPickerOpen(false); }}
+            className="w-full py-3 rounded-2xl text-[13px] font-extrabold" style={{ background: "#F6EEF6", color: "#8A7FA0" }}>
+            Remove profile picture
+          </button>
+        )}
+      </div>
+    </div>
+  );
 
   // --- My Account (real Firebase sign-in — follows you to another device) ---
   const [authMode, setAuthMode] = useState("login");   // "login" | "signup"
@@ -3037,56 +3064,37 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleF
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <button onClick={() => setStyleOpen(true)}
-            className="rounded-3xl p-4 text-left active:scale-95 transition-transform" style={{ background: PASTELS[0].bg, minHeight: 110 }}>
-            <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-2" style={{ background: "#ffffffcc" }}>
-              <Star size={22} color={PASTELS[0].text} />
-            </div>
-            <div className="text-[15px] font-black" style={{ color: PASTELS[0].text }}>My Style</div>
-            <div className="text-[12px] font-bold" style={{ color: PASTELS[0].text + "bb" }}>
-              {plural(closetCount, "piece")} · {plural(aesthetics.length, "aesthetic")}
-            </div>
-          </button>
-          <button onClick={() => setFavOpen(true)}
-            className="rounded-3xl p-4 text-left active:scale-95 transition-transform" style={{ background: PASTELS[1].bg, minHeight: 110 }}>
-            <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-2" style={{ background: "#ffffffcc" }}>
-              <Heart size={22} color={PASTELS[1].text} fill={favorites.length ? PASTELS[1].text : "none"} />
-            </div>
-            <div className="text-[15px] font-black" style={{ color: PASTELS[1].text }}>Favorited Outfits</div>
-            <div className="text-[12px] font-bold" style={{ color: PASTELS[1].text + "bb" }}>
-              {favorites.length > 0 ? `${plural(favorites.length, "look")} saved` : "None yet"}
-            </div>
-          </button>
-        </div>
-
-        {avatarPickerOpen && (
-          <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: "#00000066" }} onClick={() => setAvatarPickerOpen(false)}>
-            <div className="w-full rounded-t-3xl p-6" style={{ maxWidth: 430, background: "#fff" }} onClick={(e) => e.stopPropagation()}>
-              <div className="text-[17px] font-black text-center mb-1" style={{ color: "#5A5167" }}>Pick your profile picture</div>
-              <p className="text-[12.5px] font-semibold text-center mb-4" style={{ color: "#A99FB5" }}>Just for FitCheck — pick your favorite.</p>
-              <div className="grid grid-cols-4 gap-3 mb-4">
-                {PROFILE_AVATARS.map((a, i) => {
-                  const on = avatar === a.id;
-                  const p = PASTELS[i % PASTELS.length];
-                  return (
-                    <button key={a.id} onClick={() => { setAvatar(a.id); setAvatarPickerOpen(false); }}
-                      className="aspect-square rounded-full flex items-center justify-center text-[26px] active:scale-90 transition-transform"
-                      style={{ background: p.bg, outline: on ? `2.5px solid ${p.text}` : "2.5px solid transparent" }}>
-                      {a.emoji}
-                    </button>
-                  );
-                })}
-              </div>
-              {avatar && (
-                <button onClick={() => { setAvatar(null); setAvatarPickerOpen(false); }}
-                  className="w-full py-3 rounded-2xl text-[13px] font-extrabold" style={{ background: "#F6EEF6", color: "#8A7FA0" }}>
-                  Remove profile picture
-                </button>
-              )}
+        <button onClick={() => setStyleOpen(true)}
+          className="w-full text-left rounded-3xl p-5 mb-4 flex items-center gap-4 active:scale-[0.99] transition-transform"
+          style={{ background: "linear-gradient(120deg,#FDE9F1,#F1ECFB)" }}>
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center shrink-0" style={{ background: "#ffffffcc" }}>
+            <Star size={28} color="#C56B96" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[18px] font-black" style={{ color: "#5A5167" }}>My Style</div>
+            <div className="text-[13px] font-bold" style={{ color: "#A99FB5" }}>
+              {plural(closetCount, "piece")} · {plural(aesthetics.length, "aesthetic")} · {favorites.length} saved
             </div>
           </div>
-        )}
+          <ArrowRight size={20} color="#C99BB5" />
+        </button>
+
+        <button onClick={() => setFavOpen(true)}
+          className="w-full text-left rounded-3xl p-5 flex items-center gap-4 active:scale-[0.99] transition-transform"
+          style={{ background: "linear-gradient(120deg,#FDE9F1,#F1ECFB)" }}>
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center shrink-0" style={{ background: "#ffffffcc" }}>
+            <Heart size={26} color="#C56B96" fill={favorites.length ? "#C56B96" : "none"} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[18px] font-black" style={{ color: "#5A5167" }}>Favorited Outfits</div>
+            <div className="text-[13px] font-bold" style={{ color: "#A99FB5" }}>
+              {favorites.length > 0 ? `${plural(favorites.length, "look")} saved` : "Tap the heart on a look, or rate it 5★"}
+            </div>
+          </div>
+          <ArrowRight size={20} color="#C99BB5" />
+        </button>
+
+        {avatarPicker}
       </div>
     );
   }
@@ -3095,21 +3103,25 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleF
     <div className="pb-28">
       <h1 className="text-[34px] leading-tight font-black mb-5" style={{ color: "#5A5167" }}>Profile</h1>
 
-      {/* My Account — tap through to the Account page for the profile
-          picture, sign-in details, and My Style / Favorited Outfits. */}
+      {/* My Account — tap the picture to change your avatar; tap the rest of
+          the bar to open the Account page (sign-in details, My Style,
+          Favorited Outfits). */}
       <label className="text-[19px] font-black tracking-wide block mb-2" style={{ color: "#6E6480" }}>My Account</label>
-      <button onClick={() => setAcctPageOpen(true)}
-        className="w-full text-left rounded-3xl p-4 mb-6 flex items-center gap-3 active:scale-[0.99] transition-transform"
+      <div className="w-full rounded-3xl p-4 mb-6 flex items-center gap-3"
         style={{ background: user ? "linear-gradient(120deg,#E6F0FB,#F1ECFB)" : "#F6EEF6" }}>
-        <div className="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center shrink-0" style={{ background: "#ffffffcc" }}>
+        <button onClick={() => setAvatarPickerOpen(true)}
+          className="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center shrink-0 active:scale-90 transition-transform" style={{ background: "#ffffffcc" }}>
           {renderAvatar(48)}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-[15px] font-black truncate" style={{ color: "#5A5167" }}>{user ? (user.displayName || user.email) : "Not signed in"}</div>
-          <div className="text-[12px] font-bold" style={{ color: "#A99FB5" }}>{user ? "Signed in · synced to your account" : "Sign in to sync your closet across devices"}</div>
-        </div>
-        <ArrowRight size={20} color="#C99BB5" />
-      </button>
+        </button>
+        <button onClick={() => setAcctPageOpen(true)} className="flex-1 min-w-0 flex items-center gap-3 text-left active:opacity-70 transition-opacity">
+          <div className="flex-1 min-w-0">
+            <div className="text-[15px] font-black truncate" style={{ color: "#5A5167" }}>{user ? (user.displayName || user.email) : "Not signed in"}</div>
+            <div className="text-[12px] font-bold" style={{ color: "#A99FB5" }}>{user ? "Signed in · synced to your account" : "Sign in to sync your closet across devices"}</div>
+          </div>
+          <ArrowRight size={20} color="#C99BB5" />
+        </button>
+      </div>
+      {avatarPicker}
 
       {/* My Plans — payment isn't wired up yet, so every account is locked to
           Starter Pack. Paid tiers are shown (for the pitch) but disabled. */}
