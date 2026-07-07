@@ -56,7 +56,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260707120755";
+const APP_VERSION = "20260707122348";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -113,6 +113,7 @@ const AVATAR_BG_COLORS = [
   { id: "pink",   bg: PASTELS[0].bg }, { id: "yellow", bg: PASTELS[1].bg },
   { id: "purple", bg: PASTELS[2].bg }, { id: "blue",   bg: PASTELS[3].bg },
   { id: "green",  bg: PASTELS[4].bg }, { id: "orange", bg: PASTELS[5].bg },
+  { id: "white",  bg: "#FFFFFF" },
 ];
 const avatarBgFor = (id) => (AVATAR_BG_COLORS.find((c) => c.id === id) || AVATAR_BG_COLORS[0]).bg;
 
@@ -1825,9 +1826,9 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
             className="pointer-events-auto flex items-center gap-2 px-7 py-4 rounded-full font-black text-white active:scale-95 transition-transform"
             style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)", boxShadow: "0 12px 30px -6px #F3B6D0aa, 0 4px 10px #00000015" }}>
             {generating ? <Loader2 size={22} className="animate-spin" /> : <Sparkles size={22} />}
-            <span className="flex flex-col items-start">
+            <span className="flex flex-col items-center">
               <span className="text-[20px]">{generating ? "Styling…" : "Generate Outfits"}</span>
-              {!generating && <span className="text-[8px] font-bold text-white">Uses up to 5 generations</span>}
+              {!generating && <span className="text-[10px] font-bold text-white">Uses up to 5 generations</span>}
             </span>
           </button>
         )}
@@ -2909,7 +2910,7 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, favorites, toggleF
             return (
               <button key={c.id} onClick={() => setAvatarColor(c.id)}
                 className="w-9 h-9 rounded-full active:scale-90 transition-transform"
-                style={{ background: c.bg, outline: on ? "2.5px solid #8E78C0" : "2.5px solid transparent" }} />
+                style={{ background: c.bg, border: "1.5px solid #F1E6F1", outline: on ? "2.5px solid #8E78C0" : "2.5px solid transparent" }} />
             );
           })}
         </div>
