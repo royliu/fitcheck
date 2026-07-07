@@ -24,7 +24,10 @@
     "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
     "lucide-react": "https://esm.sh/lucide-react@0.383.0?deps=react@18.3.1",
     "onnxruntime-web": "https://esm.sh/onnxruntime-web@1.20.1",
-    "@huggingface/transformers": "https://esm.sh/@huggingface/transformers@3.3.3"
+    "@huggingface/transformers": "https://esm.sh/@huggingface/transformers@3.3.3",
+    "firebase/app": "https://esm.sh/firebase@10.14.1/app",
+    "firebase/auth": "https://esm.sh/firebase@10.14.1/auth?deps=@firebase/app@0.10.13",
+    "firebase/firestore": "https://esm.sh/firebase@10.14.1/firestore?deps=@firebase/app@0.10.13"
   }
 }
 </script>
@@ -42,10 +45,45 @@ import {
   Zap, Lock, Gift, Share2,
 } from "lucide-react";
 import { createRoot } from "react-dom/client";
+import { initializeApp } from "firebase/app";
+import {
+  getAuth, GoogleAuthProvider, signInWithPopup,
+  createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged,
+} from "firebase/auth";
+import {
+  getFirestore, doc, setDoc, getDoc, deleteDoc, collection, getDocs, writeBatch, serverTimestamp,
+} from "firebase/firestore";
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260706155740";
+const APP_VERSION = "20260706205304";
+
+/* ---------- Firebase (real cross-device accounts) ----------
+   Config values are safe to keep in client code — they identify the project,
+   they aren't secret keys. Real access control lives in Firestore's security
+   rules (only a signed-in user can read/write their own data). */
+const firebaseConfig = {
+  apiKey: "AIzaSyB5CxnSAlUYJljYDgtXMpL7MQu_jA8akPI",
+  authDomain: "fitcheck-app-ab0f2.firebaseapp.com",
+  projectId: "fitcheck-app-ab0f2",
+  storageBucket: "fitcheck-app-ab0f2.firebasestorage.app",
+  messagingSenderId: "848570439706",
+  appId: "1:848570439706:web:b7328b222677ef8eec99a3",
+  measurementId: "G-E56LBZ3955",
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
+const googleProvider = new GoogleAuthProvider();
+function friendlyAuthError(e){
+  const code = e && e.code || "";
+  if (code.includes("email-already-in-use")) return "That email already has an account — try logging in instead.";
+  if (code.includes("weak-password")) return "Password should be at least 6 characters.";
+  if (code.includes("invalid-email")) return "That doesn't look like a valid email.";
+  if (code.includes("user-not-found") || code.includes("wrong-password") || code.includes("invalid-credential")) return "Wrong email or password.";
+  if (code.includes("too-many-requests")) return "Too many attempts — wait a bit and try again.";
+  return "Something went wrong — please try again.";
+}
 
 /* ---------- Theme ---------- */
 const CREAM = "#FFFCFB";
@@ -1178,6 +1216,43 @@ async function idbSet(key, val){
 }
 // One-time migration of any wardrobe saved by the older localStorage build.
 function loadLegacyState(){ try { return JSON.parse(localStorage.getItem(STATE_LS)) || null; } catch (e) { return null; } }
+
+/* ---------- Cloud sync (Firestore) ----------
+   Closet/trash/favorites/styleBoard items carry photos (base64 data URLs), and
+   Firestore caps a single document at 1MB — a whole wardrobe as one JSON blob
+   could blow past that. So each item lives as its OWN document in a
+   sub-collection (users/{uid}/closet/{itemId}, etc.); only the small stuff
+   (aesthetics, plan, ratings, account) lives in the one users/{uid} doc. */
+const CLOUD_SUBCOLLECTIONS = ["closet", "trash", "favorites", "styleBoard"];
+async function pullCloudState(uid){
+  const mainSnap = await getDoc(doc(db, "users", uid));
+  const subSnaps = await Promise.all(CLOUD_SUBCOLLECTIONS.map((name) => getDocs(collection(db, "users", uid, name))));
+  const toArr = (snap) => snap.docs.map((d) => d.data());
+  const [closet, trash, favorites, styleBoard] = subSnaps.map(toArr);
+  return {
+    exists: mainSnap.exists(),
+    prefs: mainSnap.exists() ? { ...(mainSnap.data().prefs || {}), styleBoard } : null,
+    closet, trash, favorites,
+  };
+}
+/* Upsert every current item + delete any that were there last sync but aren't
+   anymore — diffed against the id set from the previous sync (passed in via a
+   ref so it survives across calls without re-reading the whole collection). */
+async function syncCloudCollection(uid, name, items, prevIds){
+  const colRef = collection(db, "users", uid, name);
+  const currentIds = new Set((items || []).map((i) => i.id));
+  const batch = writeBatch(db);
+  (items || []).forEach((item) => batch.set(doc(colRef, item.id), item));
+  prevIds.forEach((id) => { if (!currentIds.has(id)) batch.delete(doc(colRef, id)); });
+  await batch.commit();
+  return currentIds;
+}
+/* The small users/{uid} doc: everything in prefs EXCEPT styleBoard (that's its
+   own sub-collection, synced separately since it carries outfit photos too). */
+async function pushCloudMain(uid, prefs, onboarded){
+  const { styleBoard, ...rest } = prefs || {};
+  await setDoc(doc(db, "users", uid), { prefs: rest, onboarded, updatedAt: serverTimestamp() }, { merge: true });
+}
 
 
 /* ---------- Outfit Engine (legacy demo templates, unused) ---------- */
@@ -2738,7 +2813,7 @@ function OnboardingCloset({ onBack, onFinish }) {
 }
 
 /* ================= PROFILE ================= */
-function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, account, setAccount, onShareBonus, onReset, showToast }) {
+function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favorites, toggleFav, tryNew, setTryNew, baseStyle, setBaseStyle, feedback, styleBoard, onRate, plan, setPlan, usage, onShareBonus, onReset, showToast, user, authError, onSignInGoogle, onSignUpEmail, onSignInEmail, onSignOut }) {
   const ratedCount = feedback && feedback.ratings ? Object.keys(feedback.ratings).length : 0;
   const loved = styleBoard || [];   // the actual looks rated STYLE_STARS+ — the mood board
   const [styleOpen, setStyleOpen] = useState(false);
@@ -2748,16 +2823,19 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
   const toggle = (a) =>
     setAesthetics(aesthetics.includes(a) ? aesthetics.filter((x) => x !== a) : [...aesthetics, a]);
 
-  // --- My Account (local profile only — no backend, no password) ---
+  // --- My Account (real Firebase sign-in — follows you to another device) ---
   const [acctOpen, setAcctOpen] = useState(false);
-  const [acctName, setAcctName] = useState(account?.name || "");
-  const [acctEmail, setAcctEmail] = useState(account?.email || "");
-  const saveAccount = () => {
-    if (!acctName.trim()) return;
-    setAccount({ name: acctName.trim(), email: acctEmail.trim(), createdAt: account?.createdAt || todayKey() });
-    setAcctOpen(false);
+  const [authMode, setAuthMode] = useState("login");   // "login" | "signup"
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const submitEmailAuth = async () => {
+    if (!authEmail.trim() || authPassword.length < 6) return;
+    setAuthBusy(true);
+    try { await (authMode === "signup" ? onSignUpEmail(authEmail.trim(), authPassword) : onSignInEmail(authEmail.trim(), authPassword)); }
+    finally { setAuthBusy(false); }
   };
-  const removeAccount = () => { setAccount(null); setAcctName(""); setAcctEmail(""); setAcctOpen(false); };
+  const handleGoogle = async () => { setAuthBusy(true); try { await onSignInGoogle(); } finally { setAuthBusy(false); } };
 
   // --- My Plans (local demo — no real payment is collected) ---
   const activePlan = BILLING_LIVE ? (plan || "free") : "free";   // locked to free until billing is live, regardless of any stored plan
@@ -2878,20 +2956,20 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
     <div className="pb-28">
       <h1 className="text-[34px] leading-tight font-black mb-5" style={{ color: "#5A5167" }}>Profile</h1>
 
-      {/* My Account — local profile only; there's no backend, so this saves on
-          this device/browser only and doesn't sync across phones. */}
+      {/* My Account — a real account: sign in on another device and your
+          closet/ratings/favorites follow you there. */}
       <label className="text-[19px] font-black tracking-wide block mb-2" style={{ color: "#6E6480" }}>My Account</label>
-      <div className="rounded-3xl p-4 mb-6" style={{ background: account ? "linear-gradient(120deg,#E6F0FB,#F1ECFB)" : "#F6EEF6" }}>
-        {account ? (
+      <div className="rounded-3xl p-4 mb-6" style={{ background: user ? "linear-gradient(120deg,#E6F0FB,#F1ECFB)" : "#F6EEF6" }}>
+        {user ? (
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 font-black text-[18px]" style={{ background: "#ffffffcc", color: "#5D87A8" }}>
-              {account.name.trim().charAt(0).toUpperCase()}
+            <div className="w-12 h-12 rounded-2xl overflow-hidden flex items-center justify-center shrink-0 font-black text-[18px]" style={{ background: "#ffffffcc", color: "#5D87A8" }}>
+              {user.photoURL ? <img src={user.photoURL} alt="" className="w-full h-full object-cover" /> : (user.displayName || user.email || "?").trim().charAt(0).toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-[16px] font-black truncate" style={{ color: "#5A5167" }}>{account.name}</div>
-              <div className="text-[12px] font-bold" style={{ color: "#A99FB5" }}>Local profile · saved on this device</div>
+              <div className="text-[16px] font-black truncate" style={{ color: "#5A5167" }}>{user.displayName || user.email}</div>
+              <div className="text-[12px] font-bold" style={{ color: "#A99FB5" }}>Signed in · synced to your account</div>
             </div>
-            <button onClick={() => setAcctOpen((o) => !o)} className="px-3 py-2 rounded-xl text-[12px] font-extrabold shrink-0" style={{ background: "#ffffffcc", color: "#5D87A8" }}>Edit</button>
+            <button onClick={onSignOut} className="px-3 py-2 rounded-xl text-[12px] font-extrabold shrink-0" style={{ background: "#ffffffcc", color: "#5D87A8" }}>Sign Out</button>
           </div>
         ) : (
           <div className="flex items-center gap-3">
@@ -2899,25 +2977,37 @@ function ProfileTab({ aesthetics, setAesthetics, closetCount, closetPhoto, favor
               <User size={22} color="#8A7FA0" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-[14px] font-black" style={{ color: "#5A5167" }}>No account yet</div>
-              <div className="text-[12px] font-semibold" style={{ color: "#A99FB5" }}>Create one to save your data on this device.</div>
+              <div className="text-[14px] font-black" style={{ color: "#5A5167" }}>Not signed in</div>
+              <div className="text-[12px] font-semibold" style={{ color: "#A99FB5" }}>Sign in to sync your closet across devices.</div>
             </div>
-            <button onClick={() => setAcctOpen((o) => !o)} className="px-3.5 py-2.5 rounded-xl text-[12.5px] font-extrabold text-white shrink-0" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>Create</button>
+            <button onClick={() => setAcctOpen((o) => !o)} className="px-3.5 py-2.5 rounded-xl text-[12.5px] font-extrabold text-white shrink-0" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>Sign In</button>
           </div>
         )}
-        {acctOpen && (
+        {!user && acctOpen && (
           <div className="mt-4 pt-4" style={{ borderTop: "1.5px solid #ffffff99" }}>
-            <input value={acctName} onChange={(e) => setAcctName(e.target.value)} placeholder="Your name"
-              className="w-full rounded-2xl px-4 py-3 text-[14px] font-bold outline-none mb-2" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
-            <input value={acctEmail} onChange={(e) => setAcctEmail(e.target.value)} placeholder="Email (optional)"
-              className="w-full rounded-2xl px-4 py-3 text-[14px] font-semibold outline-none mb-3" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#6E6480" }} />
-            <div className="flex gap-2">
-              <button onClick={saveAccount} disabled={!acctName.trim()} className="flex-1 py-3 rounded-2xl text-white font-black text-[13px] disabled:opacity-40" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>Save</button>
-              {account && <button onClick={removeAccount} className="px-4 py-3 rounded-2xl font-bold text-[13px]" style={{ background: "#fff", color: "#C99BB5", border: "1.5px solid #EFE3F0" }}>Remove</button>}
+            <button onClick={handleGoogle} disabled={authBusy}
+              className="w-full py-3 rounded-2xl font-black text-[14px] flex items-center justify-center gap-2 mb-3 disabled:opacity-50"
+              style={{ background: "#fff", color: "#5A5167", border: "1.5px solid #EFE3F0" }}>
+              Continue with Google
+            </button>
+            <div className="flex items-center gap-2 mb-3">
+              <div style={{ flex: 1, height: 1, background: "#ffffff99" }} />
+              <span className="text-[11px] font-bold" style={{ color: "#A99FB5" }}>or</span>
+              <div style={{ flex: 1, height: 1, background: "#ffffff99" }} />
             </div>
-            <p className="text-[11px] font-semibold mt-2.5 leading-relaxed" style={{ color: "#B8AFC6" }}>
-              This is a local profile only — there's no server yet, so it won't sync across other phones or browsers.
-            </p>
+            <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="Email" type="email" autoComplete="email"
+              className="w-full rounded-2xl px-4 py-3 text-[14px] font-semibold outline-none mb-2" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
+            <input value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Password (6+ characters)" type="password"
+              autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+              className="w-full rounded-2xl px-4 py-3 text-[14px] font-semibold outline-none mb-3" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
+            <button onClick={submitEmailAuth} disabled={authBusy || !authEmail.trim() || authPassword.length < 6}
+              className="w-full py-3 rounded-2xl text-white font-black text-[13px] disabled:opacity-40" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>
+              {authMode === "signup" ? "Create Account" : "Log In"}
+            </button>
+            <button onClick={() => setAuthMode((m) => m === "signup" ? "login" : "signup")} className="w-full mt-2.5 text-[12.5px] font-bold text-center" style={{ color: "#8A7FA0" }}>
+              {authMode === "signup" ? "Already have an account? Log in" : "New here? Create an account"}
+            </button>
+            {authError && <p className="text-[12px] font-bold mt-2.5 text-center" style={{ color: "#D96A6A" }}>{authError}</p>}
           </div>
         )}
       </div>
@@ -3150,6 +3240,15 @@ function App() {
   const [toast, setToast] = useState("");
   const updateAvailable = useUpdateChecker();
 
+  // --- Cloud account (Firebase) ---
+  const [user, setUser] = useState(null);            // signed-in Firebase user, or null
+  const [authChecked, setAuthChecked] = useState(false);  // has Firebase told us the initial sign-in state yet?
+  const [cloudReady, setCloudReady] = useState(false);    // finished this session's pull-or-push reconciliation?
+  const [authError, setAuthError] = useState("");
+  // Which item ids existed in each cloud sub-collection as of the last sync —
+  // lets syncCloudCollection() know what got deleted locally since then.
+  const cloudIdsRef = useRef({ closet: new Set(), trash: new Set(), favorites: new Set(), styleBoard: new Set() });
+
   // Load saved state from IndexedDB once (falling back to a one-time migration of
   // the old localStorage build), then start persisting changes.
   useEffect(() => {
@@ -3183,6 +3282,87 @@ function App() {
       setHydrated(true);
     })();
   }, []);
+
+  // Track Firebase's own sign-in state (persists across reloads on its own).
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => { setUser(u); setAuthChecked(true); });
+    return unsub;
+  }, []);
+
+  // Once we know BOTH what's saved locally and whether we're signed in, decide
+  // which way data flows: an EXISTING account's cloud data wins (so a second
+  // device picks up what the first one has); a brand-new account instead gets
+  // this device's current (possibly guest) data pushed up as its starting point.
+  useEffect(() => {
+    if (!hydrated || !authChecked) return;
+    if (!user) { setCloudReady(false); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const cloud = await pullCloudState(user.uid);
+        if (cancelled) return;
+        if (cloud.exists) {
+          setOnboarded(true);
+          setPrefs({ ...defaultPrefs(), ...cloud.prefs });
+          setCloset(cloud.closet);
+          setTrash(cloud.trash);
+          setFavorites(cloud.favorites);
+          cloudIdsRef.current = {
+            closet: new Set(cloud.closet.map((i) => i.id)),
+            trash: new Set(cloud.trash.map((i) => i.id)),
+            favorites: new Set(cloud.favorites.map((i) => i.id)),
+            styleBoard: new Set((cloud.prefs.styleBoard || []).map((i) => i.id)),
+          };
+        } else {
+          // Brand-new account — upload whatever's on this device right now.
+          await pushCloudMain(user.uid, prefs, onboarded);
+          const results = await Promise.all(CLOUD_SUBCOLLECTIONS.map((name) =>
+            syncCloudCollection(user.uid, name, name === "styleBoard" ? prefs.styleBoard : { closet, trash, favorites }[name], new Set())));
+          cloudIdsRef.current = Object.fromEntries(CLOUD_SUBCOLLECTIONS.map((name, i) => [name, results[i]]));
+        }
+        if (!cancelled) setCloudReady(true);
+      } catch (e) {
+        if (!cancelled) { setAuthError("Couldn't reach your account data — you're still safe on this device."); setCloudReady(true); }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, authChecked, user]);
+
+  // While signed in, push local changes up to the cloud (debounced), so a
+  // second device sees them too. Never fires until the initial pull/push above
+  // has finished, so we don't overwrite fresh cloud data with stale local data.
+  useEffect(() => {
+    if (!cloudReady || !user) return;
+    const t = setTimeout(async () => {
+      try {
+        await pushCloudMain(user.uid, prefs, onboarded);
+        const byName = { closet, trash, favorites, styleBoard: prefs.styleBoard || [] };
+        const results = await Promise.all(CLOUD_SUBCOLLECTIONS.map((name) =>
+          syncCloudCollection(user.uid, name, byName[name], cloudIdsRef.current[name])));
+        cloudIdsRef.current = Object.fromEntries(CLOUD_SUBCOLLECTIONS.map((name, i) => [name, results[i]]));
+      } catch (e) { /* offline or blocked — local IndexedDB copy still has everything */ }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [cloudReady, user, onboarded, prefs, closet, trash, favorites]);
+
+  // --- Sign in / up / out ---
+  const signInGoogle = async () => {
+    setAuthError("");
+    try { await signInWithPopup(auth, googleProvider); }
+    catch (e) { setAuthError(e && e.code === "auth/popup-closed-by-user" ? "" : "Couldn't sign in with Google — try again."); }
+  };
+  const signUpEmail = async (email, password) => {
+    setAuthError("");
+    try { await createUserWithEmailAndPassword(auth, email, password); }
+    catch (e) { setAuthError(friendlyAuthError(e)); }
+  };
+  const signInEmail = async (email, password) => {
+    setAuthError("");
+    try { await signInWithEmailAndPassword(auth, email, password); }
+    catch (e) { setAuthError(friendlyAuthError(e)); }
+  };
+  const signOutUser = async () => { try { await signOut(auth); } catch (e) {} };
 
   // Persist wardrobe + learning whenever they change (after the initial load, so
   // we never overwrite saved data with the starting defaults).
@@ -3310,7 +3490,6 @@ function App() {
     showToast(capped ? "Today's share bonus is already maxed out" : `+${SHARE_BONUS} generations today — thanks for sharing!`);
   };
   const setPlan = (key) => setPrefs((p) => ({ ...p, plan: key }));
-  const setAccount = (acct) => setPrefs((p) => ({ ...p, account: acct }));
 
   // Restart — wipe everything (IndexedDB + the old localStorage key) and reload,
   // so the app comes back up exactly like a brand-new install.
@@ -3375,7 +3554,8 @@ function App() {
             <CameraTab onAdd={addItem} active={tab === "camera"} initialPhoto={pendingPhoto} onConsumeInitial={() => setPendingPhoto(null)} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection} />
           </div>
           {tab === "profile" && (
-            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} account={prefs.account} setAccount={setAccount} onShareBonus={grantShareBonus} onReset={handleReset} showToast={showToast} />
+            <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} closetCount={closet.length} closetPhoto={prefs.closetPhoto} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} onShareBonus={grantShareBonus} onReset={handleReset} showToast={showToast}
+              user={user} authError={authError} onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} onSignOut={signOutUser} />
           )}
         </div>
 
