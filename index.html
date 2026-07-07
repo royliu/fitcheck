@@ -56,7 +56,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260707124206";
+const APP_VERSION = "20260707131615";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -2642,10 +2642,11 @@ function UpdateBanner({ show }) {
 }
 
 /* ================= ONBOARDING ================= */
-function Onboarding({ onDone }) {
-  const [step, setStep] = useState("base"); // base | aesthetic | closet
+function Onboarding({ onDone, onSignInGoogle, onSignUpEmail, onSignInEmail, authError, user }) {
+  const [step, setStep] = useState("base"); // base | aesthetic | closet | account
   const [base, setBase] = useState(null);   // "Cali" | "Korean"
   const [picked, setPicked] = useState([]);
+  const [collected, setCollected] = useState(null); // { aesthetics, baseStyle, closetPhoto } once the closet step finishes
 
   const toggle = (a) =>
     setPicked((p) => (p.includes(a) ? p.filter((x) => x !== a) : [...p, a]));
@@ -2734,10 +2735,18 @@ function Onboarding({ onDone }) {
               </button>
             </div>
           </div>
-        ) : (
+        ) : step === "closet" ? (
           <OnboardingCloset
             onBack={() => setStep("aesthetic")}
-            onFinish={(photo) => onDone({ aesthetics: picked, baseStyle: base, closetPhoto: photo })}
+            onFinish={(photo) => { setCollected({ aesthetics: picked, baseStyle: base, closetPhoto: photo }); setStep("account"); }}
+          />
+        ) : (
+          <OnboardingAccount
+            onBack={() => setStep("closet")}
+            onSkip={() => onDone(collected)}
+            onDone={() => onDone(collected)}
+            onSignInGoogle={onSignInGoogle} onSignUpEmail={onSignUpEmail} onSignInEmail={onSignInEmail}
+            authError={authError} user={user}
           />
         )}
       </div>
@@ -2857,6 +2866,69 @@ function OnboardingCloset({ onBack, onFinish }) {
           <button onClick={() => setPhoto(null)} className="w-full py-3 mt-2 text-[13px] font-bold" style={{ color: "#C99BB5" }}>Retake</button>
         </div>
       )}
+    </div>
+  );
+}
+
+function OnboardingAccount({ onBack, onSkip, onDone, onSignInGoogle, onSignUpEmail, onSignInEmail, authError, user }) {
+  const [authMode, setAuthMode] = useState("signup"); // "signup" | "login"
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+
+  // Once sign-in/sign-up actually succeeds, `user` flips truthy — move on right away.
+  useEffect(() => { if (user) onDone(); }, [user]);
+
+  const submitEmailAuth = async () => {
+    if (!authEmail.trim() || authPassword.length < 6) return;
+    setAuthBusy(true);
+    try { await (authMode === "signup" ? onSignUpEmail(authEmail.trim(), authPassword) : onSignInEmail(authEmail.trim(), authPassword)); }
+    finally { setAuthBusy(false); }
+  };
+  const handleGoogle = async () => { setAuthBusy(true); try { await onSignInGoogle(); } finally { setAuthBusy(false); } };
+
+  return (
+    <div className="px-6 pt-16 pb-10">
+      {/* progress */}
+      <div className="flex gap-2 mb-10">
+        <div className="h-1.5 rounded-full flex-1" style={{ background: "#F3A7CB" }} />
+        <div className="h-1.5 rounded-full flex-1" style={{ background: "#F3A7CB" }} />
+      </div>
+
+      <button onClick={onBack} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-4" style={{ color: "#A99FB5" }}>
+        <ArrowLeft size={18} /> Back
+      </button>
+
+      <h1 className="text-[30px] leading-tight font-black mb-2" style={{ color: "#5A5167" }}>Save your style</h1>
+      <p className="text-[15px] font-semibold mb-6" style={{ color: "#A99FB5" }}>Create an account so your closet, ratings, and favorites follow you to any device.</p>
+
+      <button onClick={handleGoogle} disabled={authBusy}
+        className="w-full py-3.5 rounded-2xl font-black text-[14px] flex items-center justify-center gap-2 mb-3 disabled:opacity-50"
+        style={{ background: "#fff", color: "#5A5167", border: "1.5px solid #EFE3F0" }}>
+        Continue with Google
+      </button>
+      <div className="flex items-center gap-2 mb-3">
+        <div style={{ flex: 1, height: 1, background: "#EFE3F0" }} />
+        <span className="text-[11px] font-bold" style={{ color: "#A99FB5" }}>or</span>
+        <div style={{ flex: 1, height: 1, background: "#EFE3F0" }} />
+      </div>
+      <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="Email" type="email" autoComplete="email"
+        className="w-full rounded-2xl px-4 py-3.5 text-[14px] font-semibold outline-none mb-2" style={{ background: "#F6EEF6", color: "#5A5167" }} />
+      <input value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Password (6+ characters)" type="password"
+        autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+        className="w-full rounded-2xl px-4 py-3.5 text-[14px] font-semibold outline-none mb-3" style={{ background: "#F6EEF6", color: "#5A5167" }} />
+      <button onClick={submitEmailAuth} disabled={authBusy || !authEmail.trim() || authPassword.length < 6}
+        className="w-full py-3.5 rounded-2xl text-white font-black text-[14px] disabled:opacity-40 mb-2" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>
+        {authMode === "signup" ? "Create Account" : "Log In"}
+      </button>
+      <button onClick={() => setAuthMode((m) => m === "signup" ? "login" : "signup")} className="w-full text-[12.5px] font-bold text-center mb-1" style={{ color: "#8A7FA0" }}>
+        {authMode === "signup" ? "Already have an account? Log in" : "New here? Create an account"}
+      </button>
+      {authError && <p className="text-[12px] font-bold mt-1 text-center" style={{ color: "#D96A6A" }}>{authError}</p>}
+
+      <button onClick={onSkip} className="w-full text-[13px] font-bold text-center mt-6" style={{ color: "#A99FB5" }}>
+        Skip for now
+      </button>
     </div>
   );
 }
@@ -3669,7 +3741,7 @@ function App() {
   }
 
   if (!onboarded) {
-    return <Onboarding onDone={finishOnboarding} />;
+    return <Onboarding onDone={finishOnboarding} onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} authError={authError} user={user} />;
   }
 
   return (
