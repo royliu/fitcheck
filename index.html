@@ -56,7 +56,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260706205304";
+const APP_VERSION = "20260706213833";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -115,7 +115,7 @@ const ACCESSORY_SUBCATS = [
   { key: "Socks", icon: Footprints },
 ];
 
-const AESTHETICS = ["Streetwear","Minimalist","Coquette","Clean Girl","Dark Academia","Grunge","Soft Girl","Cottagecore","Y2K","Romantic Feminine","Boho","Angelcore","Baddie","Hipster","Indie","Kawaii"];
+const AESTHETICS = ["Streetwear","Minimalist","Coquette","Dark Academia","Grunge","Soft Girl","Cottagecore","Y2K","Romantic Feminine","Angelcore","Baddie","Indie","Kawaii"];
 const OCCASIONS = ["School Day","Work / Office","Business Meeting","Job Interview","Casual Hangout","Brunch","Date Night","Dinner Out","Party","Birthday Party","Night Out","Concert / Festival","Recital / Performance","Wedding","Formal Event","Graduation","Church","Vacation","Beach Day","Gym / Workout","Travel Day"];
 
 const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
@@ -603,11 +603,9 @@ async function downscaleDataUrl(dataUrl,max=1000){
 /* Pinterest-style reference photos per aesthetic — swap these URLs for your own pins. */
 const AESTHETIC_PHOTOS = {
   "Minimalist":"https://images.unsplash.com/photo-1485462537746-965f33f7f6a7?auto=format&fit=crop&w=600&q=70",
-  "Clean Girl":"https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=600&q=70",
   "Korean Style":"https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=600&q=70",
   "Coquette":"https://images.unsplash.com/photo-1495385794356-15371f348c31?auto=format&fit=crop&w=600&q=70",
   "Soft Girl":"https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=600&q=70",
-  "Boho":"https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=600&q=70",
   "Cottagecore":"https://images.unsplash.com/photo-1502716119720-b23a93e5fe1b?auto=format&fit=crop&w=600&q=70",
   "Y2K":"https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=600&q=70",
   "Romantic Feminine":"https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&w=600&q=70",
@@ -615,7 +613,6 @@ const AESTHETIC_PHOTOS = {
   "Streetwear":"https://images.unsplash.com/photo-1520975954732-35dd22299614?auto=format&fit=crop&w=600&q=70",
   "Angelcore":"https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&w=600&q=70",
   "Baddie":"https://images.unsplash.com/photo-1520975954732-35dd22299614?auto=format&fit=crop&w=600&q=70",
-  "Hipster":"https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=600&q=70",
   "Indie":"https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=600&q=70",
   "Kawaii":"https://images.unsplash.com/photo-1495385794356-15371f348c31?auto=format&fit=crop&w=600&q=70",
   _default:"https://images.unsplash.com/photo-1485462537746-965f33f7f6a7?auto=format&fit=crop&w=600&q=70",
@@ -807,12 +804,12 @@ function makeNote(items, ctx){
    in the outfit). */
 const VIBE_WORDS_BY_AESTHETIC = {
   "Streetwear": ["Street", "Off-Duty", "Edgy"], "Minimalist": ["Minimalist", "Clean", "Simple"],
-  "Coquette": ["Sweet", "Coquette", "Girly"], "Clean Girl": ["Clean Girl", "Effortless", "Polished"],
+  "Coquette": ["Sweet", "Coquette", "Girly"],
   "Dark Academia": ["Academia", "Moody", "Scholarly"], "Grunge": ["Grunge", "Rebel", "Edgy"],
   "Soft Girl": ["Soft", "Dreamy", "Sweet"], "Cottagecore": ["Cottagecore", "Whimsical", "Countryside"],
   "Y2K": ["Y2K", "Retro", "Throwback"], "Romantic Feminine": ["Romantic", "Dreamy", "Feminine"],
-  "Boho": ["Boho", "Free-Spirited", "Earthy"], "Angelcore": ["Angelic", "Ethereal", "Dreamy"],
-  "Baddie": ["Baddie", "Bold", "Fierce"], "Hipster": ["Hipster", "Vintage", "Indie"],
+  "Angelcore": ["Angelic", "Ethereal", "Dreamy"],
+  "Baddie": ["Baddie", "Bold", "Fierce"],
   "Indie": ["Indie", "Artsy", "Eclectic"], "Kawaii": ["Kawaii", "Playful", "Cute"],
 };
 function titleCaseWords(s){ return s.replace(/\w\S*/g, (t) => t.charAt(0).toUpperCase() + t.slice(1)); }
@@ -871,17 +868,14 @@ const AESTHETIC_TRAITS = {
   "Streetwear":       { types:[/hoodie|sweatshirt|cargo|sneaker|bomber|baseball cap|sweatpant|windbreaker|denim jacket|graphic/], colors:["Black","Gray","Charcoal","White","Olive","Navy"] },
   "Minimalist":       { types:[/turtleneck|trouser|blazer|button-up|knit sweater|loafer|trench|slip dress|tank|midi/], colors:["Black","White","Gray","Beige","Cream","Tan","Navy"] },
   "Coquette":         { types:[/mini skirt|pleated skirt|camisole|ballet flat|mary jane|blouse|mini dress|cardigan|bow|lace/], colors:["Pink","Light Pink","White","Cream","Mauve","Red"] },
-  "Clean Girl":       { types:[/tank|camisole|trouser|slip dress|blazer|loafer|turtleneck|midi|button-up/], colors:["White","Beige","Cream","Tan","Black","Gray","Brown"] },
   "Dark Academia":    { types:[/blazer|trouser|button-up|turtleneck|loafer|wool coat|pleated skirt|knit sweater|trench|cardigan/], colors:["Brown","Black","Charcoal","Olive","Maroon","Beige","Navy","Cream"] },
   "Grunge":           { types:[/leather jacket|denim jacket|ankle boot|boot|button-up|skinny jean|cargo|hoodie|graphic/], colors:["Black","Charcoal","Gray","Maroon","Olive","Dark Green"] },
   "Soft Girl":        { types:[/cardigan|crop top|mini skirt|hoodie|sundress|mary jane|mom jean/], colors:["Pink","Light Pink","Light Blue","Purple","Cream","White"] },
   "Cottagecore":      { types:[/midi dress|maxi dress|sundress|blouse|cardigan|wide-brim|ballet flat|pleated skirt|knit/], colors:["Cream","Beige","Green","Olive","Brown","White","Tan","Light Pink"] },
   "Y2K":              { types:[/crop top|skinny jean|mini skirt|cargo|bomber|sneaker|bucket hat|camisole|baby tee/], colors:["Pink","Light Blue","Blue","Purple","Orange","Red"] },
   "Romantic Feminine":{ types:[/blouse|midi dress|slip dress|maxi dress|heel|ballet flat|pleated skirt|camisole|lace/], colors:["Pink","Light Pink","Mauve","Cream","White","Red","Maroon"] },
-  "Boho":             { types:[/maxi dress|sundress|wide-leg|sandal|cardigan|wide-brim|denim|midi skirt/], colors:["Brown","Tan","Olive","Cream","Beige","Orange","Maroon"] },
   "Angelcore":        { types:[/slip dress|maxi dress|camisole|ballet flat|blouse|midi dress|lace/], colors:["White","Cream","Light Pink","Light Blue","Beige"] },
   "Baddie":           { types:[/bodycon|crop top|cargo|leather jacket|heel|mini skirt|sneaker|mules/], colors:["Black","Charcoal","Red","White","Brown"] },
-  "Hipster":          { types:[/button-up|beanie|denim jacket|cardigan|loafer|trouser|bucket hat/], colors:["Olive","Brown","Yellow","Teal","Charcoal","Navy"] },
   "Indie":            { types:[/mom jean|cardigan|bucket hat|sneaker|button-up|trouser|graphic|beanie/], colors:["Yellow","Green","Orange","Brown","Teal","Purple"] },
   "Kawaii":           { types:[/crop top|mini skirt|hoodie|mary jane|mini dress|cardigan|bow/], colors:["Pink","Light Pink","Light Blue","Purple","White","Yellow"] },
 };
@@ -1019,7 +1013,7 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
   // Aesthetic plan for the 5 looks — drop strongly-disliked aesthetics and lead
   // with the ones the user has rated highest.
   const likedArr=[...likedAesthetics].filter(a=>aScore(a)>-3);
-  const preferred=(likedArr.length?likedArr:["Minimalist","Clean Girl","Streetwear"]).slice().sort((a,b)=>aScore(b)-aScore(a));
+  const preferred=(likedArr.length?likedArr:["Minimalist","Coquette","Streetwear"]).slice().sort((a,b)=>aScore(b)-aScore(a));
   const others=AESTHETICS.filter(a=>!likedAesthetics.has(a)&&aScore(a)>-2).sort((a,b)=>aScore(b)-aScore(a));
   const plan=[];
   for(let i=0;i<5;i++){
@@ -1032,7 +1026,13 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
 
   // How well an item fits a slot for a given aesthetic. Aesthetic match dominates,
   // then learned ratings + favorites.
-  const score=(it,aes)=> 2.4*aestheticAffinity(it,aes) + occasionAffinity(it,opts.occasion) + iScore(it.id) + (it.fav?0.6:0) + (favItemIds.has(it.id)?0.6:0);
+  // A small per-item random jitter (fixed for THIS generation call, via jitterMap)
+  // reshuffles near-ties so hitting "Generate Outfits" again — even for the same
+  // occasion — surfaces a different combination instead of the literal same 5
+  // looks every time. It's too small to override a real aesthetic/occasion signal.
+  const jitterMap = new Map();
+  const jitter = (id) => { if(!jitterMap.has(id)) jitterMap.set(id, (Math.random()-0.5)*0.8); return jitterMap.get(id); };
+  const score=(it,aes)=> 2.4*aestheticAffinity(it,aes) + occasionAffinity(it,opts.occasion) + iScore(it.id) + (it.fav?0.6:0) + (favItemIds.has(it.id)?0.6:0) + jitter(it.id);
   const rankedFor=(arr,aes)=>[...arr].sort((a,b)=>score(b,aes)-score(a,aes));
   const isDress=it=>!!it && /dress/i.test((it.noun||"")+" "+(it.name||""));
   // Up to 2 accessories from DIFFERENT sub-categories (never two bags). The
@@ -2328,6 +2328,7 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
     setPhoto(null);
     setError(null);
     setPicker(null);
+    startCamera();   // resume the live view so the next item can be snapped right away
   };
 
   const retake = () => {
@@ -2339,9 +2340,9 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
 
   return (
     <div className="pb-28">
-      <h1 className="text-[34px] leading-tight font-black mb-2" style={{ color: "#5A5167" }}>Take a picture to add to closet</h1>
+      <h1 className="text-[34px] leading-tight font-black mb-2" style={{ color: "#5A5167" }}>Take a picture of your clothes</h1>
       <p className="text-[13.5px] font-semibold mb-2" style={{ color: "#A99FB5" }}>
-        Take a picture of your clothes — step back and ensure your clothes are mostly visible.
+        Lay out or hang up a few pieces at a time — we'll pick out every item in the shot. Snap as many rounds as you need to add your whole wardrobe.
       </p>
 
       {/* Viewfinder */}
@@ -2724,8 +2725,8 @@ function OnboardingCloset({ onBack, onFinish }) {
         <ArrowLeft size={18} /> Back
       </button>
 
-      <h1 className="text-[30px] leading-tight font-black mb-2" style={{ color: "#5A5167" }}>Snap your closet</h1>
-      <p className="text-[15px] font-semibold mb-6" style={{ color: "#A99FB5" }}>Point your camera at your closet so we can start building your wardrobe.</p>
+      <h1 className="text-[30px] leading-tight font-black mb-2" style={{ color: "#5A5167" }}>Take a picture of your clothes</h1>
+      <p className="text-[15px] font-semibold mb-6" style={{ color: "#A99FB5" }}>Lay out or hang up a few pieces — we'll pick out every item in the shot. You can add more anytime from the Camera tab.</p>
 
       {/* Viewfinder */}
       <div className="relative rounded-3xl overflow-hidden mb-6"
