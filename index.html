@@ -56,7 +56,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260707131615";
+const APP_VERSION = "20260707132716";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -2642,6 +2642,18 @@ function UpdateBanner({ show }) {
 }
 
 /* ================= ONBOARDING ================= */
+/* Shared 4-segment progress bar — one segment per step (style, aesthetic,
+   first photo, account) — used by Onboarding itself plus the two step
+   components that live outside it (OnboardingCloset, OnboardingAccount). */
+function OnboardingProgress({ n }) {
+  return (
+    <div className="flex gap-2 mb-10">
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="h-1.5 rounded-full flex-1" style={{ background: i < n ? "#F3A7CB" : "#EFE3F0" }} />
+      ))}
+    </div>
+  );
+}
 function Onboarding({ onDone, onSignInGoogle, onSignUpEmail, onSignInEmail, authError, user }) {
   const [step, setStep] = useState("base"); // base | aesthetic | closet | account
   const [base, setBase] = useState(null);   // "Cali" | "Korean"
@@ -2651,20 +2663,12 @@ function Onboarding({ onDone, onSignInGoogle, onSignUpEmail, onSignInEmail, auth
   const toggle = (a) =>
     setPicked((p) => (p.includes(a) ? p.filter((x) => x !== a) : [...p, a]));
 
-  const Progress = ({ n }) => (
-    <div className="flex gap-2 mb-10">
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="h-1.5 rounded-full flex-1" style={{ background: i < n ? "#F3A7CB" : "#EFE3F0" }} />
-      ))}
-    </div>
-  );
-
   return (
     <div style={{ fontFamily: "'Nunito', sans-serif", background: "linear-gradient(180deg,#FDF1F6,#F1F4FC)", minHeight: "100vh" }}>
       <div className="mx-auto relative" style={{ maxWidth: 430, minHeight: "100vh", background: "linear-gradient(180deg,#FFFCFE,#FBFAFF)" }}>
         {step === "base" ? (
           <div className="px-6 pt-16 pb-10">
-            <Progress n={1} />
+            <OnboardingProgress n={1} />
             <div className="text-[15px] font-black tracking-widest mb-2" style={{ color: "#C56B96" }}>WELCOME TO FITCHECK</div>
             <h1 className="text-[38px] leading-tight font-black mb-2" style={{ color: "#5A5167" }}>Which style do you prefer?</h1>
             <p className="text-[16px] font-semibold mb-6" style={{ color: "#A99FB5" }}>We'll base your looks on this vibe — then layer your aesthetics on top.</p>
@@ -2697,7 +2701,7 @@ function Onboarding({ onDone, onSignInGoogle, onSignUpEmail, onSignInEmail, auth
           </div>
         ) : step === "aesthetic" ? (
           <div className="px-6 pt-16 pb-10">
-            <Progress n={2} />
+            <OnboardingProgress n={2} />
             <button onClick={() => setStep("base")} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-4" style={{ color: "#A99FB5" }}>
               <ArrowLeft size={18} /> Back
             </button>
@@ -2772,11 +2776,7 @@ function OnboardingCloset({ onBack, onFinish }) {
 
   return (
     <div className="px-6 pt-16 pb-10">
-      {/* progress */}
-      <div className="flex gap-2 mb-10">
-        <div className="h-1.5 rounded-full flex-1" style={{ background: "#F3A7CB" }} />
-        <div className="h-1.5 rounded-full flex-1" style={{ background: "#F3A7CB" }} />
-      </div>
+      <OnboardingProgress n={3} />
 
       <button onClick={onBack} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-4" style={{ color: "#A99FB5" }}>
         <ArrowLeft size={18} /> Back
@@ -2889,44 +2889,65 @@ function OnboardingAccount({ onBack, onSkip, onDone, onSignInGoogle, onSignUpEma
 
   return (
     <div className="px-6 pt-16 pb-10">
-      {/* progress */}
-      <div className="flex gap-2 mb-10">
-        <div className="h-1.5 rounded-full flex-1" style={{ background: "#F3A7CB" }} />
-        <div className="h-1.5 rounded-full flex-1" style={{ background: "#F3A7CB" }} />
-      </div>
+      <OnboardingProgress n={4} />
 
       <button onClick={onBack} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-4" style={{ color: "#A99FB5" }}>
         <ArrowLeft size={18} /> Back
       </button>
 
-      <h1 className="text-[30px] leading-tight font-black mb-2" style={{ color: "#5A5167" }}>Save your style</h1>
-      <p className="text-[15px] font-semibold mb-6" style={{ color: "#A99FB5" }}>Create an account so your closet, ratings, and favorites follow you to any device.</p>
-
-      <button onClick={handleGoogle} disabled={authBusy}
-        className="w-full py-3.5 rounded-2xl font-black text-[14px] flex items-center justify-center gap-2 mb-3 disabled:opacity-50"
-        style={{ background: "#fff", color: "#5A5167", border: "1.5px solid #EFE3F0" }}>
-        Continue with Google
-      </button>
-      <div className="flex items-center gap-2 mb-3">
-        <div style={{ flex: 1, height: 1, background: "#EFE3F0" }} />
-        <span className="text-[11px] font-bold" style={{ color: "#A99FB5" }}>or</span>
-        <div style={{ flex: 1, height: 1, background: "#EFE3F0" }} />
+      <div className="w-20 h-20 rounded-3xl mx-auto flex items-center justify-center mb-5" style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)", boxShadow: "0 12px 30px -6px #F3B6D0aa" }}>
+        <Sparkles size={36} color="#fff" />
       </div>
-      <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="Email" type="email" autoComplete="email"
-        className="w-full rounded-2xl px-4 py-3.5 text-[14px] font-semibold outline-none mb-2" style={{ background: "#F6EEF6", color: "#5A5167" }} />
-      <input value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Password (6+ characters)" type="password"
-        autoComplete={authMode === "signup" ? "new-password" : "current-password"}
-        className="w-full rounded-2xl px-4 py-3.5 text-[14px] font-semibold outline-none mb-3" style={{ background: "#F6EEF6", color: "#5A5167" }} />
-      <button onClick={submitEmailAuth} disabled={authBusy || !authEmail.trim() || authPassword.length < 6}
-        className="w-full py-3.5 rounded-2xl text-white font-black text-[14px] disabled:opacity-40 mb-2" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>
-        {authMode === "signup" ? "Create Account" : "Log In"}
-      </button>
-      <button onClick={() => setAuthMode((m) => m === "signup" ? "login" : "signup")} className="w-full text-[12.5px] font-bold text-center mb-1" style={{ color: "#8A7FA0" }}>
-        {authMode === "signup" ? "Already have an account? Log in" : "New here? Create an account"}
-      </button>
-      {authError && <p className="text-[12px] font-bold mt-1 text-center" style={{ color: "#D96A6A" }}>{authError}</p>}
 
-      <button onClick={onSkip} className="w-full text-[13px] font-bold text-center mt-6" style={{ color: "#A99FB5" }}>
+      <h1 className="text-[30px] leading-tight font-black mb-2 text-center" style={{ color: "#5A5167" }}>Never lose your fit</h1>
+      <p className="text-[15px] font-semibold mb-6 text-center" style={{ color: "#A99FB5" }}>Create an account and your closet, ratings, and favorites follow you anywhere.</p>
+
+      <div className="grid grid-cols-3 gap-2.5 mb-7">
+        {[
+          { label: "Cloud sync", icon: Cloud },
+          { label: "Your style, saved", icon: Heart },
+          { label: "Takes 10 seconds", icon: Zap },
+        ].map((f, i) => {
+          const p = PASTELS[i % PASTELS.length];
+          const Icon = f.icon;
+          return (
+            <div key={f.label} className="rounded-2xl py-4 flex flex-col items-center gap-2" style={{ background: p.bg }}>
+              <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: "#ffffffcc" }}>
+                <Icon size={20} color={p.text} />
+              </div>
+              <span className="text-[11px] font-extrabold text-center px-1" style={{ color: p.text }}>{f.label}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="rounded-3xl p-5" style={{ background: "linear-gradient(160deg,#FDF1F6,#F4EEF9)" }}>
+        <button onClick={handleGoogle} disabled={authBusy}
+          className="w-full py-3.5 rounded-2xl font-black text-[14px] flex items-center justify-center gap-2 mb-3 disabled:opacity-50"
+          style={{ background: "#fff", color: "#5A5167", border: "1.5px solid #EFE3F0" }}>
+          Continue with Google
+        </button>
+        <div className="flex items-center gap-2 mb-3">
+          <div style={{ flex: 1, height: 1, background: "#ffffff99" }} />
+          <span className="text-[11px] font-bold" style={{ color: "#A99FB5" }}>or</span>
+          <div style={{ flex: 1, height: 1, background: "#ffffff99" }} />
+        </div>
+        <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="Email" type="email" autoComplete="email"
+          className="w-full rounded-2xl px-4 py-3.5 text-[14px] font-semibold outline-none mb-2" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
+        <input value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Password (6+ characters)" type="password"
+          autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+          className="w-full rounded-2xl px-4 py-3.5 text-[14px] font-semibold outline-none mb-3" style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
+        <button onClick={submitEmailAuth} disabled={authBusy || !authEmail.trim() || authPassword.length < 6}
+          className="w-full py-3.5 rounded-2xl text-white font-black text-[14px] disabled:opacity-40 mb-2" style={{ background: "linear-gradient(135deg,#FBB8D2,#F3A7CB)" }}>
+          {authMode === "signup" ? "Create Account" : "Log In"}
+        </button>
+        <button onClick={() => setAuthMode((m) => m === "signup" ? "login" : "signup")} className="w-full text-[12.5px] font-bold text-center" style={{ color: "#8A7FA0" }}>
+          {authMode === "signup" ? "Already have an account? Log in" : "New here? Create an account"}
+        </button>
+        {authError && <p className="text-[12px] font-bold mt-2 text-center" style={{ color: "#D96A6A" }}>{authError}</p>}
+      </div>
+
+      <button onClick={onSkip} className="w-full text-[13px] font-bold text-center mt-5" style={{ color: "#A99FB5" }}>
         Skip for now
       </button>
     </div>
