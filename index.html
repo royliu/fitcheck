@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260708122725";
+const APP_VERSION = "20260708145943";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -2802,23 +2802,24 @@ function Onboarding({ onDone, onAddItem, corrections, onCorrect, onSignInGoogle,
           <div>
             <div className="px-6 pt-16">
               <OnboardingProgress n={3} />
-              <button onClick={() => setStep("aesthetic")} className="flex items-center gap-1.5 text-[14px] font-extrabold mb-2" style={{ color: "#A99FB5" }}>
-                <ArrowLeft size={18} /> Back
-              </button>
+              <div className="flex items-center justify-between mb-2">
+                <button onClick={() => setStep("aesthetic")} className="flex items-center gap-1.5 text-[14px] font-extrabold" style={{ color: "#A99FB5" }}>
+                  <ArrowLeft size={18} /> Back
+                </button>
+                {addedCount > 0 && (
+                  <button onClick={() => { setCollected({ aesthetics: picked, baseStyle: base }); setStep("account"); }}
+                    className="flex items-center gap-1.5 text-[14px] font-extrabold" style={{ color: "#A99FB5" }}>
+                    Next <ArrowRight size={18} />
+                  </button>
+                )}
+              </div>
             </div>
             <div className="px-6">
               <CameraTab active compact onAdd={handleAddItem} corrections={corrections} onCorrect={onCorrect} />
             </div>
             <div className="px-6 pb-10 mt-0.5">
               {addedCount > 0 ? (
-                <>
-                  <p className="text-[12.5px] font-bold text-center mb-3" style={{ color: "#6BA37C" }}>{plural(addedCount, "piece")} added to your closet ✓</p>
-                  <button onClick={() => { setCollected({ aesthetics: picked, baseStyle: base }); setStep("account"); }}
-                    className="w-full py-3.5 rounded-full text-white font-black text-[15px] flex items-center justify-center gap-2 active:scale-95 transition-transform"
-                    style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)" }}>
-                    Next <ArrowRight size={18} />
-                  </button>
-                </>
+                <p className="text-[12.5px] font-bold text-center" style={{ color: "#6BA37C" }}>{plural(addedCount, "piece")} added to your closet ✓</p>
               ) : (
                 <button onClick={() => { setCollected({ aesthetics: picked, baseStyle: base }); setStep("account"); }} className="w-full text-[13px] font-bold text-center" style={{ color: "#A99FB5" }}>
                   Skip for now
