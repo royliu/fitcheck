@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260707164319";
+const APP_VERSION = "20260708113044";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -2757,10 +2757,8 @@ function Onboarding({ onDone, onAddItem, corrections, onCorrect, onSignInGoogle,
               {addedCount > 0 && (
                 <p className="text-[12.5px] font-bold text-center mb-3" style={{ color: "#6BA37C" }}>{plural(addedCount, "piece")} added to your closet ✓</p>
               )}
-              <button onClick={() => { setCollected({ aesthetics: picked, baseStyle: base }); setStep("account"); }}
-                className="w-full py-4 rounded-full text-white font-black text-[16px] flex items-center justify-center gap-2 active:scale-95 transition-transform"
-                style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)" }}>
-                Continue <ArrowRight size={20} />
+              <button onClick={() => { setCollected({ aesthetics: picked, baseStyle: base }); setStep("account"); }} className="w-full text-[13px] font-bold text-center" style={{ color: "#A99FB5" }}>
+                Skip for now
               </button>
             </div>
           </div>
