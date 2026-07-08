@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260708113044";
+const APP_VERSION = "20260708115629";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -384,11 +384,15 @@ async function cutoutItems(items, sc, W, H, onStage){
       const areaA=(a[2]-a[0])*(a[3]-a[1]);
       return areaA>0 ? (iw*ih)/areaA : 0;
     };
+    // A box flush against the photo's edge means the item is cut off there — not
+    // fully in frame, so we can't safely show it isolated on a white background.
+    const frameMargin=Math.max(2, Math.round(Math.min(W,H)*0.01));
     for(const it of items){
       const cls=SEG_CLASSES[it.detLabel]; if(!cls) continue;
       const layers=cls.map((c)=>masks.get(c)).filter(Boolean);
       if(!layers.length) continue;                       // garment class not segmented → keep crop
       const layeredWithAnother=items.some((other)=>other!==it && other.bbox && boxOverlapFrac(it.bbox,other.bbox)>0.2);
+      const cutOffByFrame=it.bbox[0]<=frameMargin || it.bbox[1]<=frameMargin || it.bbox[2]>=W-frameMargin || it.bbox[3]>=H-frameMargin;
       const [x1,y1,x2,y2]=it.bbox;
       const exX=Math.round((x2-x1)*0.06), exY=Math.round((y2-y1)*0.06);
       const bx1=Math.max(0,x1-exX), by1=Math.max(0,y1-exY), bx2=Math.min(W,x2+exX), by2=Math.min(H,y2+exY);
@@ -430,15 +434,17 @@ async function cutoutItems(items, sc, W, H, onStage){
       const wx=wc.getContext("2d"); wx.fillStyle="#fff"; wx.fillRect(0,0,ow,oh); wx.drawImage(oc,0,0);
       const cutout=wc.toDataURL("image/jpeg",0.92);
       it.clfPhoto=cutout;
-      // Only swap the photo SHOWN in the closet when: the mask confidently covers
-      // most of its own box, there's no meaningful hair/skin/limb inside that box
-      // (worn-on-body — a small hand-corner grip from holding it up is fine, a
-      // sleeve full of arm or a collar full of hair is not), and no OTHER detected
-      // garment heavily overlaps this one's box (layered pieces, like a jacket over
-      // a shirt). Anything short of that keeps the plain rectangular crop instead
-      // of a cutout that looks jagged or shows the wrong garment's edges.
+      // Only swap the photo SHOWN in the closet for a laid-out/held-up shot with
+      // the (near-)whole item in frame: the mask confidently covers most of its
+      // own box, the box isn't cut off by the photo's edge, there's no meaningful
+      // hair/skin/limb inside that box (worn-on-body — a small hand-corner grip
+      // from holding it up is fine, a sleeve full of arm or a collar full of hair
+      // is not), and no OTHER detected garment heavily overlaps this one's box
+      // (layered pieces, like a jacket over a shirt). Anything short of that keeps
+      // the plain rectangular crop instead of a cutout that looks jagged or shows
+      // the wrong garment's edges.
       const wornOnBody = bodyPx > ow*oh*0.06;
-      if(nz > ow*oh*0.35 && !wornOnBody && !layeredWithAnother) it.photo=cutout;
+      if(nz > ow*oh*0.35 && !wornOnBody && !layeredWithAnother && !cutOffByFrame) it.photo=cutout;
     }
   }catch(e){ /* keep rectangular crops */ }
 }
@@ -1996,6 +2002,10 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
   const counts = CATEGORIES.reduce((a, c) => {
     a[c.key] = closet.filter((i) => i.category === c.key).length; return a;
   }, {});
+  // "Laundry" and "Liked" are cross-cutting views (any category, filtered by
+  // wash/fav) rather than real closet categories, so they're counted separately.
+  counts.Laundry = closet.filter((i) => i.wash).length;
+  counts.Liked = closet.filter((i) => i.fav).length;
   const subCounts = ACCESSORY_SUBCATS.reduce((a, s) => {
     a[s.key] = closet.filter((i) => i.category === "Accessories" && i.subcategory === s.key).length; return a;
   }, {});
@@ -2108,10 +2118,16 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
     );
   }
 
-  /* ---- Item list (category or accessory sub-category) ---- */
+  /* ---- Item list (category, accessory sub-category, or the cross-cutting
+     Laundry/Liked views) ---- */
   if (activeCat) {
-    const items = activeSub
-      ? closet.filter((i) => i.category === "Accessories" && i.subcategory === activeSub)
+    // Laundry and Liked aren't real categories — they filter across ALL of them
+    // by wash/fav status instead, so an item can show up here no matter what
+    // category it's actually filed under.
+    const isCrossCut = activeCat === "Laundry" || activeCat === "Liked";
+    const items = activeCat === "Laundry" ? closet.filter((i) => i.wash)
+      : activeCat === "Liked" ? closet.filter((i) => i.fav)
+      : activeSub ? closet.filter((i) => i.category === "Accessories" && i.subcategory === activeSub)
       : closet.filter((i) => i.category === activeCat);
     const title = activeSub || activeCat;
     const goBack = activeSub ? () => { setActiveSub(null); setSwiped(null); } : () => { setActiveCat(null); setSwiped(null); };
@@ -2126,17 +2142,23 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
           {items.length === 0 ? (
             <div className="rounded-3xl p-8 text-center" style={{ background: "#F6EEF6" }}>
               <div className="text-[15px] font-black" style={{ color: "#A99FB5" }}>No {title.toLowerCase()} yet</div>
-              <p className="text-[13px] font-semibold mt-1" style={{ color: "#C6BCD2" }}>Snap a piece below to add it here.</p>
+              <p className="text-[13px] font-semibold mt-1" style={{ color: "#C6BCD2" }}>
+                {activeCat === "Laundry" ? "Tap the laundry icon on a piece to mark it as in the wash."
+                  : activeCat === "Liked" ? "Tap the heart icon on a piece you love wearing."
+                  : "Snap a piece below to add it here."}
+              </p>
             </div>
           ) : (
             items.map((item) => <ClosetItemRow key={item.id} item={item} onTrash={toTrash} onToggleWash={toggleWash} onToggleFav={toggleFav} onOpen={(it) => setDetailId(it.id)} />)
           )}
         </div>
-        <button onClick={goCamera}
-          className="mt-5 w-full flex items-center justify-center gap-2 py-4 rounded-2xl text-[15px] font-black border-2"
-          style={{ borderColor: "#DDD0F2", color: "#8E78C0", background: "#F1ECFB" }}>
-          <Plus size={20} /> Add Item…
-        </button>
+        {!isCrossCut && (
+          <button onClick={goCamera}
+            className="mt-5 w-full flex items-center justify-center gap-2 py-4 rounded-2xl text-[15px] font-black"
+            style={{ color: "#7E6AB5", background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
+            <Plus size={20} /> Add Item…
+          </button>
+        )}
         {detailModal}
       </div>
     );
@@ -2176,6 +2198,25 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
               </button>
             );
           })}
+          {/* Laundry / Liked — cross-cutting views (wash/fav), not real categories */}
+          <button onClick={() => setActiveCat("Laundry")}
+            className="rounded-3xl p-4 text-left active:scale-95 transition-transform"
+            style={{ background: PASTELS[5 % PASTELS.length].bg, minHeight: 110 }}>
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-2" style={{ background: "#ffffffcc" }}>
+              <WashingMachine size={22} color={PASTELS[5 % PASTELS.length].text} />
+            </div>
+            <div className="text-[15px] font-black" style={{ color: PASTELS[5 % PASTELS.length].text }}>Laundry</div>
+            <div className="text-[12px] font-bold" style={{ color: PASTELS[5 % PASTELS.length].text + "bb" }}>{plural(counts.Laundry, "piece")}</div>
+          </button>
+          <button onClick={() => setActiveCat("Liked")}
+            className="rounded-3xl p-4 text-left active:scale-95 transition-transform"
+            style={{ background: PASTELS[6 % PASTELS.length].bg, minHeight: 110 }}>
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-2" style={{ background: "#ffffffcc" }}>
+              <Heart size={22} color={PASTELS[6 % PASTELS.length].text} />
+            </div>
+            <div className="text-[15px] font-black" style={{ color: PASTELS[6 % PASTELS.length].text }}>Liked</div>
+            <div className="text-[12px] font-bold" style={{ color: PASTELS[6 % PASTELS.length].text + "bb" }}>{plural(counts.Liked, "piece")}</div>
+          </button>
           {/* Trash tile */}
           <button onClick={() => setInTrash(true)}
             className="rounded-3xl p-4 text-left active:scale-95 transition-transform"
@@ -2272,7 +2313,7 @@ function useCamera(active = true) {
   return { videoRef, canvasRef, camState, facing, startCamera, flipCamera, capture, stopStream };
 }
 
-function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections, onCorrect }) {
+function CameraTab({ onAdd, active, corrections, onCorrect, compact }) {
   const { videoRef, canvasRef, camState, facing, startCamera, flipCamera, capture, stopStream } = useCamera(active);
   const fileRef = useRef(null);
   const [scanning, setScanning] = useState(false);
@@ -2309,12 +2350,6 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
   const removeItem = (i) => setResults((rs) => { const next = (rs || []).filter((_, j) => j !== i); return next.length ? next : null; });
   const renameItem = (i, name) => setResults((rs) => rs.map((r, j) => j === i ? { ...r, name } : r));
   const setItemColor = (i, color) => setResults((rs) => rs.map((r, j) => j === i ? { ...r, color } : r));
-
-  // Auto-scan a photo handed in from onboarding ("Snap your closet").
-  useEffect(() => {
-    if (initialPhoto) { processImage(initialPhoto); onConsumeInitial && onConsumeInitial(); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialPhoto]);
 
   const processImage = async (dataUrl) => {
     // Release the camera hardware before the heavy ML work starts. On a phone,
@@ -2388,7 +2423,7 @@ function CameraTab({ onAdd, active, initialPhoto, onConsumeInitial, corrections,
   };
 
   return (
-    <div className="pb-28">
+    <div className={compact ? "" : "pb-28"}>
       <h1 className="text-[34px] leading-tight font-black mb-2" style={{ color: "#5A5167" }}>Take a picture of your clothes</h1>
       <p className="text-[13.5px] font-semibold mb-2" style={{ color: "#A99FB5" }}>
         Lay out or hang up a few pieces at a time — we'll pick out every item in the shot. Snap as many rounds as you need to add your whole wardrobe.
@@ -2666,6 +2701,16 @@ function Onboarding({ onDone, onAddItem, corrections, onCorrect, onSignInGoogle,
     setPicked((p) => (p.includes(a) ? p.filter((x) => x !== a) : [...p, a]));
   const handleAddItem = (item) => { onAddItem(item); setAddedCount((n) => n + 1); };
 
+  // Once something's actually been added to the closet, move on automatically —
+  // no need for "Skip for now" anymore since there's nothing left to skip. The
+  // short delay lets the "added to your closet" confirmation actually be seen.
+  useEffect(() => {
+    if (addedCount === 0) return;
+    const t = setTimeout(() => { setCollected({ aesthetics: picked, baseStyle: base }); setStep("account"); }, 900);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addedCount]);
+
   return (
     <div style={{ fontFamily: "'Nunito', sans-serif", background: "linear-gradient(180deg,#FDF1F6,#F1F4FC)", minHeight: "100vh" }}>
       <div className="mx-auto relative" style={{ maxWidth: 430, minHeight: "100vh", background: "linear-gradient(180deg,#FFFCFE,#FBFAFF)" }}>
@@ -2751,15 +2796,16 @@ function Onboarding({ onDone, onAddItem, corrections, onCorrect, onSignInGoogle,
               </button>
             </div>
             <div className="px-6">
-              <CameraTab active onAdd={handleAddItem} corrections={corrections} onCorrect={onCorrect} />
+              <CameraTab active compact onAdd={handleAddItem} corrections={corrections} onCorrect={onCorrect} />
             </div>
             <div className="px-6 pb-10">
-              {addedCount > 0 && (
-                <p className="text-[12.5px] font-bold text-center mb-3" style={{ color: "#6BA37C" }}>{plural(addedCount, "piece")} added to your closet ✓</p>
+              {addedCount > 0 ? (
+                <p className="text-[12.5px] font-bold text-center" style={{ color: "#6BA37C" }}>{plural(addedCount, "piece")} added to your closet ✓</p>
+              ) : (
+                <button onClick={() => { setCollected({ aesthetics: picked, baseStyle: base }); setStep("account"); }} className="w-full text-[13px] font-bold text-center" style={{ color: "#A99FB5" }}>
+                  Skip for now
+                </button>
               )}
-              <button onClick={() => { setCollected({ aesthetics: picked, baseStyle: base }); setStep("account"); }} className="w-full text-[13px] font-bold text-center" style={{ color: "#A99FB5" }}>
-                Skip for now
-              </button>
             </div>
           </div>
         ) : (
