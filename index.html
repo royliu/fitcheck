@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260708121427";
+const APP_VERSION = "20260708122725";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -264,7 +264,7 @@ function iou(a, b) {
 
 /* --- detailed garment labelling (CLIP zero-shot; optional 2nd model) --- */
 const DETAIL_CANDIDATES = {
-  top:["t-shirt","tank top","crop top","blouse","button-up shirt","knit sweater","hoodie","sweatshirt","cardigan","polo shirt","camisole","turtleneck"],
+  top:["t-shirt","tank top","crop top","blouse","button-up shirt","henley shirt","knit sweater","hoodie","sweatshirt","cardigan","polo shirt","camisole","turtleneck"],
   bottom:["denim jeans","skinny jeans","wide-leg jeans","trousers","leggings","sweatpants","cargo pants","mini skirt","midi skirt","pleated skirt","denim shorts","shorts"],
   dress:["mini dress","midi dress","maxi dress","slip dress","shirt dress","sundress","knit dress","bodycon dress"],
   outer:["denim jacket","leather jacket","blazer","bomber jacket","puffer jacket","trench coat","wool coat","cardigan","windbreaker"],
@@ -427,24 +427,25 @@ async function cutoutItems(items, sc, W, H, onStage){
       // Re-name the colour from the clean garment pixels (no skin/background bleed).
       let cb=null; for(const e of cbuckets.values()){ if(!cb||e[3]>cb[3]) cb=e; }
       if(cb){ const col=classifyColor(cb[0]/cb[3],cb[1]/cb[3],cb[2]/cb[3]); if(col){ it.color=col; it.name=col+" "+it.noun; } }
-      // White-flatten the masked garment — always used for the detail classifier's
-      // clean view.
+      // White-flatten the masked garment.
       ox.putImageData(idata,0,0);
       const wc=document.createElement("canvas"); wc.width=ow; wc.height=oh;
       const wx=wc.getContext("2d"); wx.fillStyle="#fff"; wx.fillRect(0,0,ow,oh); wx.drawImage(oc,0,0);
       const cutout=wc.toDataURL("image/jpeg",0.92);
-      it.clfPhoto=cutout;
-      // Only swap the photo SHOWN in the closet for a laid-out/held-up shot with
-      // the (near-)whole item in frame: the mask confidently covers most of its
-      // own box, the box isn't cut off by the photo's edge, there's no meaningful
+      // Trust the mask (for BOTH the photo shown in the closet AND the crop handed
+      // to the detail classifier) only for a laid-out/held-up shot with the
+      // (near-)whole item in frame: the mask confidently covers most of its own
+      // box, the box isn't cut off by the photo's edge, there's no meaningful
       // hair/skin/limb inside that box (worn-on-body — a small hand-corner grip
       // from holding it up is fine, a sleeve full of arm or a collar full of hair
       // is not), and no OTHER detected garment heavily overlaps this one's box
-      // (layered pieces, like a jacket over a shirt). Anything short of that keeps
-      // the plain rectangular crop instead of a cutout that looks jagged or shows
-      // the wrong garment's edges.
+      // (layered pieces, like a jacket over a shirt). A masked cutout built from a
+      // worn photo can bleed hair into the garment's silhouette — which is exactly
+      // what was reading as a "turtleneck" — so classification falls back to the
+      // plain rectangular crop in that case too, not just the display photo.
       const wornOnBody = bodyPx > ow*oh*0.06;
-      if(nz > ow*oh*0.35 && !wornOnBody && !layeredWithAnother && !cutOffByFrame) it.photo=cutout;
+      const trustMask = nz > ow*oh*0.35 && !wornOnBody && !layeredWithAnother && !cutOffByFrame;
+      if(trustMask){ it.photo=cutout; it.clfPhoto=cutout; }
     }
   }catch(e){ /* keep rectangular crops */ }
 }
@@ -473,10 +474,14 @@ function whiteBalanceGains(srcCanvas){
 /* Name a color from HSV — hue is far more stable under brightness changes than RGB. */
 function classifyColor(r,g,b){
   const [h,s,v]=rgb2hsv(r,g,b);
-  // Dark or low-saturation colors are neutral — tiny channel noise gives dark
-  // pixels a fake hue, so resolve those to black/charcoal/gray FIRST.
-  if(v<0.20)return"Black";
-  if(s<0.16){ if(v>0.85)return"White"; return v<0.45?"Charcoal":"Gray"; }
+  // Only resolve to black/charcoal/gray FIRST when there's truly no reliable
+  // hue signal: either near-zero light at all, or dark AND desaturated. A dark
+  // but still colorful fabric (brown, maroon, navy, dark green) keeps real
+  // saturation even at low brightness — those have their own hue-based branch
+  // below and shouldn't get swallowed into "Black" by brightness alone (that
+  // was misreading dim-lit dark browns/maroons as flat black).
+  if(v<0.10)return"Black";
+  if(s<0.16){ if(v>0.85)return"White"; if(v<0.28)return"Black"; return v<0.45?"Charcoal":"Gray"; }
   if(s<0.28&&v<0.42)return"Charcoal";
   if(s<0.30&&v>0.62){ if(h>=18&&h<70)return v>0.82?"Cream":"Beige"; if(h>=200&&h<260)return"Light Blue"; if(h>=290||h<18)return"Light Pink"; }
   if(h<16||h>=345)return v<0.45?"Maroon":"Red";
@@ -2156,8 +2161,8 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
         </div>
         {!isCrossCut && (
           <button onClick={goCamera}
-            className="mt-5 w-full flex items-center justify-center gap-2 py-4 rounded-2xl text-[15px] font-black"
-            style={{ color: "#7E6AB5", background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
+            className="mt-5 w-full flex items-center justify-center gap-2 py-4 rounded-2xl text-[15px] font-black text-white"
+            style={{ background: "linear-gradient(135deg,#C3A6EE,#8FB4EC)", boxShadow: "0 10px 24px -8px #A98FE066" }}>
             <Plus size={20} /> Add Item…
           </button>
         )}
