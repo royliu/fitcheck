@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260708145943";
+const APP_VERSION = "20260709132413";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -375,6 +375,18 @@ async function cutoutItems(items, sc, W, H, onStage){
     for(const s of segs){ if(s&&s.label&&s.mask&&s.mask.data) masks.set(s.label,s.mask.data); }
     const bodyLayers=BODY_PART_CLASSES.map((c)=>masks.get(c)).filter(Boolean);
     const mW=pw, mH=ph;
+    // Merge all body-part layers into ONE mask, once, up front — checking 6
+    // separate layers per PIXEL, for every pixel of every item's (upscaled,
+    // up to 560x560) crop, was a large synchronous per-pixel cost with no
+    // yield back to the browser. That's the same shape of bug that crashed
+    // phone tabs during "Polishing photos" before (the old sharpenCanvas
+    // unsharp-mask loop) — a single combined array turns the per-pixel body
+    // check back into one cheap lookup instead of up to six.
+    let bodyMask=null;
+    if(bodyLayers.length){
+      bodyMask=new Uint8Array(pw*ph);
+      for(let i=0;i<bodyMask.length;i++){ let bm=0; for(const L of bodyLayers){ const v=L[i]; if(v>bm)bm=v; } bodyMask[i]=bm; }
+    }
     // Two detected garments overlapping heavily (a jacket boxed over the shirt
     // underneath, say) means whichever crop we're looking at likely has the OTHER
     // garment bleeding into it — not a clean single-item shot.
@@ -388,6 +400,10 @@ async function cutoutItems(items, sc, W, H, onStage){
     // fully in frame, so we can't safely show it isolated on a white background.
     const frameMargin=Math.max(2, Math.round(Math.min(W,H)*0.01));
     for(const it of items){
+      // Give the browser a breath between items — several 560x560 pixel loops
+      // back-to-back with zero yield is exactly the kind of unresponsive-tab
+      // pattern that gets a phone tab killed/reloaded mid-scan.
+      await new Promise((r)=>setTimeout(r,0));
       const cls=SEG_CLASSES[it.detLabel]; if(!cls) continue;
       const layers=cls.map((c)=>masks.get(c)).filter(Boolean);
       if(!layers.length) continue;                       // garment class not segmented → keep crop
@@ -417,10 +433,7 @@ async function cutoutItems(items, sc, W, H, onStage){
             const k=(px[o4]>>4)+"_"+(px[o4+1]>>4)+"_"+(px[o4+2]>>4);
             const e=cbuckets.get(k)||[0,0,0,0]; e[0]+=px[o4];e[1]+=px[o4+1];e[2]+=px[o4+2];e[3]++; cbuckets.set(k,e);
           }
-          if(bodyLayers.length){
-            let bm=0; for(const L of bodyLayers){ const v=L[my*mW+mx]; if(v>bm)bm=v; }
-            if(bm>110) bodyPx++;                          // hair/skin/limb showing at this pixel
-          }
+          if(bodyMask && bodyMask[my*mW+mx]>110) bodyPx++;  // hair/skin/limb showing at this pixel
         }
       }
       if(nz < ow*oh*0.02) continue;                      // too little matched → keep crop
