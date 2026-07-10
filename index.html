@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260709132413";
+const APP_VERSION = "20260709171147";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -3709,12 +3709,6 @@ function App() {
     s.textContent = `@keyframes scan{0%{top:0}100%{top:100%}}`;
     document.head.appendChild(s);
 
-    // Warm up BOTH AI models in the background (in parallel) the moment the app
-    // opens — they download while you're in onboarding, so the first scan is fast.
-    (async () => {
-      try { await Promise.allSettled([getDetector(), getClassifier()]); } catch (e) { /* ignore */ }
-    })();
-
     // Pull the real local weather (asks for location; falls back to IP).
     fetchWeather().then((w) => { if (w) setWeather(w); }).catch(() => {});
 
@@ -3726,6 +3720,18 @@ function App() {
       setTimeout(() => showToast(`Your last scan was interrupted during "${interrupted.stage}" — please try again`), 1200);
     }
   }, []);
+
+  // Warm up BOTH AI models in the background once onboarding is actually done —
+  // NOT the instant the app opens. Eagerly downloading+initializing a ~174MB
+  // WASM model while a brand-new user is still on the very first onboarding
+  // screens (picking Cali/Korean, picking aesthetics) competes for memory at
+  // exactly the moment a phone's Safari is most likely to kill the tab for it.
+  // A returning (already-onboarded) user still gets the same "warm before you
+  // need it" benefit, since this fires the moment hydration confirms that.
+  useEffect(() => {
+    if (!hydrated || !onboarded) return;
+    (async () => { try { await Promise.allSettled([getDetector(), getClassifier()]); } catch (e) { /* ignore */ } })();
+  }, [hydrated, onboarded]);
 
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 1800); };
 
