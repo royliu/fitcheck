@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260709172945";
+const APP_VERSION = "20260709174403";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -253,6 +253,16 @@ async function getDetector(onStage) {
   })();
   try { return await _ortLoadPromise; } finally { _ortLoadPromise = null; }
 }
+// Detector, segmentation parser, and CLIP classifier are three separate WASM
+// models — kept "warm" (all three resident for the rest of the scan) that's
+// a lot of simultaneous memory on a phone, and matches where crashes were
+// being reported (mid/late in a scan, once all three had loaded). Each is now
+// released the moment its OWN stage is done, so at most one is resident at a
+// time instead of an ever-growing pile. Trade-off: every subsequent photo in
+// the same session reloads all three from scratch instead of reusing warm
+// sessions — slower repeat scans, but a scan that doesn't crash beats a fast
+// one that does.
+async function releaseDetector(){ try{ if(_ortSession&&_ortSession.release) await _ortSession.release(); }catch(e){} _ortSession=null; }
 
 function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
 function iou(a, b) {
@@ -295,6 +305,7 @@ async function getClassifier(onStage){
   })();
   try{ return await _clipLoadPromise; } finally { _clipLoadPromise=null; }
 }
+async function releaseClassifier(){ try{ if(_clip&&_clip.dispose) await _clip.dispose(); }catch(e){} _clip=null; }
 function titleCase(s){ return s.replace(/\b\w/g,c=>c.toUpperCase()); }
 /* Refine each item's noun into a detailed garment type. Best-effort: keeps the
    coarse label if the detail model is unsure or fails to load. */
@@ -324,6 +335,9 @@ async function refineLabels(items, onStage){
       }
     }
   }catch(e){ /* keep coarse labels */ }
+  // Classification's done — free it before the annotated overview photo and
+  // every item's photo get decoded and painted for the results screen.
+  await releaseClassifier();
   return items;
 }
 
@@ -361,6 +375,7 @@ async function getParser(onStage){
   })();
   try{ return await _segLoadPromise; } finally { _segLoadPromise=null; }
 }
+async function releaseParser(){ try{ if(_parser&&_parser.dispose) await _parser.dispose(); }catch(e){} _parser=null; }
 async function cutoutItems(items, sc, W, H, onStage){
   try{
     if(!items.length) return;
@@ -481,6 +496,9 @@ async function cutoutItems(items, sc, W, H, onStage){
       oc.width=0; oc.height=0;
     }
   }catch(e){ /* keep rectangular crops */ }
+  // Segmentation's done — free it before the CLIP classifier loads for
+  // "Naming your pieces" instead of holding both at once.
+  await releaseParser();
 }
 
 const COLOR_PALETTE = [
@@ -687,6 +705,9 @@ async function detectGarments(dataUrl,onStage,corrections,fullUrl){
     items.push({name:color+" "+map.noun,category:map.category,subcategory:map.sub||null,color,noun:map.noun,detLabel:d.label,photo:enhanceCrop(fullImg,fx,fy,fbw,fbh),bbox:[x1,y1,x2,y2],area:bw*bh});
   }
   items.sort((a,b)=>b.area-a.area);
+  // Detection is fully done at this point (boxes extracted into items) — free
+  // its WASM memory before the next model loads instead of stacking all three.
+  await releaseDetector();
   // Cut out the garment FIRST (removes background + neighbouring clothes), THEN
   // read colour and type from those clean pixels — far more accurate than the raw
   // rectangular crop, which bleeds in skin, background and adjacent garments.
