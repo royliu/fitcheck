@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260709172014";
+const APP_VERSION = "20260709172141";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -399,8 +399,15 @@ async function cutoutItems(items, sc, W, H, onStage){
     // A box flush against the photo's edge means the item is cut off there — not
     // fully in frame, so we can't safely show it isolated on a white background.
     const frameMargin=Math.max(2, Math.round(Math.min(W,H)*0.01));
+    let itemIdx=0;
     for(const it of items){
-      // Give the browser a breath between items — several 560x560 pixel loops
+      itemIdx++;
+      // Stamp per-item progress (not just the stage name) into the same
+      // breadcrumb an interrupted scan reports on reload — if a crash still
+      // happens here, we'll know exactly which item of how many it died on
+      // instead of just "somewhere in Polishing photos".
+      onStage&&onStage(`Polishing photos… (${itemIdx}/${items.length})`);
+      // Give the browser a breath between items — several 480x480 pixel loops
       // back-to-back with zero yield is exactly the kind of unresponsive-tab
       // pattern that gets a phone tab killed/reloaded mid-scan.
       await new Promise((r)=>setTimeout(r,0));
