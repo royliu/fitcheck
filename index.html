@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260709171147";
+const APP_VERSION = "20260709172014";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -413,10 +413,16 @@ async function cutoutItems(items, sc, W, H, onStage){
       const exX=Math.round((x2-x1)*0.06), exY=Math.round((y2-y1)*0.06);
       const bx1=Math.max(0,x1-exX), by1=Math.max(0,y1-exY), bx2=Math.min(W,x2+exX), by2=Math.min(H,y2+exY);
       const cw=bx2-bx1, ch=by2-by1; if(cw<6||ch<6) continue;
-      const up=Math.min(2, Math.max(1, 560/Math.max(cw,ch)));   // upscale small crops for quality
+      // Smaller cap than before (480 vs 560) — less ImageData/canvas memory per
+      // item, which matters a lot once you multiply by several items in one
+      // photo plus the two ML models already resident in memory.
+      const up=Math.min(2, Math.max(1, 480/Math.max(cw,ch)));   // upscale small crops for quality
       const ow=Math.round(cw*up), oh=Math.round(ch*up);
       const oc=document.createElement("canvas"); oc.width=ow; oc.height=oh;
-      const ox=oc.getContext("2d"); ox.imageSmoothingEnabled=true; ox.imageSmoothingQuality="high";
+      // willReadFrequently steers this canvas to a CPU-backed buffer from the
+      // start — getImageData right after drawImage is otherwise a slow (and
+      // memory-duplicating) GPU-to-CPU readback on some engines.
+      const ox=oc.getContext("2d",{willReadFrequently:true}); ox.imageSmoothingEnabled=true; ox.imageSmoothingQuality="high";
       ox.drawImage(sc, bx1,by1,cw,ch, 0,0,ow,oh);
       const idata=ox.getImageData(0,0,ow,oh); const px=idata.data;
       let nz=0,bodyPx=0,minx=ow,miny=oh,maxx=0,maxy=0;
@@ -436,15 +442,10 @@ async function cutoutItems(items, sc, W, H, onStage){
           if(bodyMask && bodyMask[my*mW+mx]>110) bodyPx++;  // hair/skin/limb showing at this pixel
         }
       }
-      if(nz < ow*oh*0.02) continue;                      // too little matched → keep crop
+      if(nz < ow*oh*0.02){ oc.width=0; oc.height=0; continue; }  // too little matched → keep crop
       // Re-name the colour from the clean garment pixels (no skin/background bleed).
       let cb=null; for(const e of cbuckets.values()){ if(!cb||e[3]>cb[3]) cb=e; }
       if(cb){ const col=classifyColor(cb[0]/cb[3],cb[1]/cb[3],cb[2]/cb[3]); if(col){ it.color=col; it.name=col+" "+it.noun; } }
-      // White-flatten the masked garment.
-      ox.putImageData(idata,0,0);
-      const wc=document.createElement("canvas"); wc.width=ow; wc.height=oh;
-      const wx=wc.getContext("2d"); wx.fillStyle="#fff"; wx.fillRect(0,0,ow,oh); wx.drawImage(oc,0,0);
-      const cutout=wc.toDataURL("image/jpeg",0.92);
       // Trust the mask (for BOTH the photo shown in the closet AND the crop handed
       // to the detail classifier) only for a laid-out/held-up shot with the
       // (near-)whole item in frame: the mask confidently covers most of its own
@@ -458,7 +459,19 @@ async function cutoutItems(items, sc, W, H, onStage){
       // plain rectangular crop in that case too, not just the display photo.
       const wornOnBody = bodyPx > ow*oh*0.06;
       const trustMask = nz > ow*oh*0.35 && !wornOnBody && !layeredWithAnother && !cutOffByFrame;
-      if(trustMask){ it.photo=cutout; it.clfPhoto=cutout; }
+      // Only build the white-flattened cutout (a SECOND canvas + a toDataURL
+      // encode) when it'll actually be used — for a typical worn/on-body photo
+      // trustMask is false for every item, so this used to do that expensive
+      // work for nothing, on every item, every scan.
+      if(trustMask){
+        ox.putImageData(idata,0,0);
+        const wc=document.createElement("canvas"); wc.width=ow; wc.height=oh;
+        const wx=wc.getContext("2d"); wx.fillStyle="#fff"; wx.fillRect(0,0,ow,oh); wx.drawImage(oc,0,0);
+        const cutout=wc.toDataURL("image/jpeg",0.92);
+        it.photo=cutout; it.clfPhoto=cutout;
+        wc.width=0; wc.height=0;                          // release its backing memory now, not whenever GC gets to it
+      }
+      oc.width=0; oc.height=0;
     }
   }catch(e){ /* keep rectangular crops */ }
 }
