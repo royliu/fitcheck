@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260709172141";
+const APP_VERSION = "20260709172945";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -565,20 +565,27 @@ const CAT_COLORS={Tops:"#E891B5",Bottoms:"#8E78C0",Shoes:"#6B9AC0",Outerwear:"#6
 
 /* Draw labeled boxes over the photo so the user SEES what was identified. */
 function annotatePhoto(img,W,H,items){
-  const ac=document.createElement("canvas");ac.width=W;ac.height=H;
-  const ax=ac.getContext("2d");ax.drawImage(img,0,0,W,H);
-  const fs=Math.max(15,Math.round(W/32));
-  ax.lineWidth=Math.max(3,Math.round(W/170));
+  // This is just a review-screen overview, not a detail crop — downscaling it
+  // cuts decoded-canvas memory right at the moment it's rendered alongside
+  // every item's own photo, which is when phones have been crashing.
+  const s=Math.min(1, 760/Math.max(W,H));
+  const cw=Math.round(W*s), ch=Math.round(H*s);
+  const ac=document.createElement("canvas");ac.width=cw;ac.height=ch;
+  const ax=ac.getContext("2d");ax.drawImage(img,0,0,cw,ch);
+  const fs=Math.max(15,Math.round(cw/32));
+  ax.lineWidth=Math.max(3,Math.round(cw/170));
   ax.font="700 "+fs+"px system-ui, sans-serif";ax.textBaseline="top";
   for(const it of items){
-    const [x1,y1,x2,y2]=it.bbox;const col=CAT_COLORS[it.category]||"#E891B5";
+    const [bx1,by1,bx2,by2]=it.bbox;const x1=bx1*s,y1=by1*s,x2=bx2*s,y2=by2*s;const col=CAT_COLORS[it.category]||"#E891B5";
     ax.strokeStyle=col;ax.strokeRect(x1,y1,x2-x1,y2-y1);
     const label=it.name;const tw=ax.measureText(label).width;const th=fs+8;
     const ly=y1-th>=0?y1-th:y1;
     ax.fillStyle=col;ax.fillRect(x1,ly,tw+14,th);
     ax.fillStyle="#fff";ax.fillText(label,x1+7,ly+4);
   }
-  return ac.toDataURL("image/jpeg",0.92);
+  const out=ac.toDataURL("image/jpeg",0.92);
+  ac.width=0; ac.height=0;
+  return out;
 }
 
 /* Light unsharp-mask for crispness on the enhanced crops. */
@@ -593,7 +600,12 @@ function annotatePhoto(img,W,H,items){
    mobile CPU reads as a hung page. Dropped in favor of just the (GPU-accelerated,
    effectively free) canvas filter below. */
 function enhanceCrop(src,sx,sy,sw,sh){
-  const CAP=1000;
+  // Lowered from 1000 — every detected item gets one of these (regardless of
+  // whether it ends up using the cutout path), so this size is the biggest
+  // lever on how much decoded-image memory is resident right as results
+  // render (several of these + the annotated overview photo, all decoding
+  // and painting at once, on top of two already-resident WASM ML models).
+  const CAP=760;
   let scale=Math.min(CAP/Math.max(sw,sh), 2.2);      // shrink oversized crops to CAP, upscale tiny ones up to 2.2x
   if(!isFinite(scale)||scale<=0) scale=1;
   const w=Math.max(1,Math.round(sw*scale)), h=Math.max(1,Math.round(sh*scale));
