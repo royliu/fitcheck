@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260709174403";
+const APP_VERSION = "20260712160354";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -381,7 +381,11 @@ async function cutoutItems(items, sc, W, H, onStage){
     if(!items.length) return;
     const parser=await getParser(onStage);
     onStage&&onStage("Polishing photos…");
-    const ps=Math.min(1, 1024/Math.max(W,H));           // parse at <=1024 for speed
+    // Cut the segmentation model's OWN input size (was <=1024) — its inference
+    // memory/compute scales with pixel count, and every other fix so far only
+    // targeted the JS around it, not the model call itself. 512 is still
+    // plenty for garment-region masks at the scale they're actually used.
+    const ps=Math.min(1, 512/Math.max(W,H));
     const pw=Math.round(W*ps), ph=Math.round(H*ps);
     const pcv=document.createElement("canvas"); pcv.width=pw; pcv.height=ph;
     pcv.getContext("2d").drawImage(sc,0,0,pw,ph);
@@ -3764,15 +3768,25 @@ function App() {
 
     // Pull the real local weather (asks for location; falls back to IP).
     fetchWeather().then((w) => { if (w) setWeather(w); }).catch(() => {});
+  }, []);
 
-    // If a scan was mid-flight last time the app closed (a crash/reload, not a
-    // normal finish — this survives a real page reload, unlike React state),
-    // let the user know what happened instead of silently losing their photo.
+  // If a scan was mid-flight last time the app closed (a crash/reload, not a
+  // normal finish — this survives a real page reload, unlike React state), let
+  // the user know what happened instead of silently losing their photo. Gated
+  // on hydrated (not fired from the plain mount effect above): hydration can
+  // easily take longer than this toast's own 1200ms-delay + 1800ms-autoclear
+  // window (IndexedDB + Firebase auth checks), so firing it unconditionally on
+  // mount meant the whole toast could show AND disappear while still on the
+  // splash screen — which never renders <Toast> — losing the message
+  // entirely. Firing only once hydrated confirms we're on a screen that can
+  // actually show it.
+  useEffect(() => {
+    if (!hydrated) return;
     const interrupted = takeInterruptedScan();
     if (interrupted) {
-      setTimeout(() => showToast(`Your last scan was interrupted during "${interrupted.stage}" — please try again`), 1200);
+      setTimeout(() => showToast(`Your last scan was interrupted during "${interrupted.stage}" — please try again`), 600);
     }
-  }, []);
+  }, [hydrated]);
 
   // Warm up BOTH AI models in the background once onboarding is actually done —
   // NOT the instant the app opens. Eagerly downloading+initializing a ~174MB
@@ -3854,8 +3868,14 @@ function App() {
   }
 
   if (!onboarded) {
-    return <Onboarding onDone={finishOnboarding} onAddItem={addItem} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection}
-      onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} onForgotPassword={sendPasswordReset} authError={authError} user={user} />;
+    return (
+      <>
+        <Onboarding onDone={finishOnboarding} onAddItem={addItem} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection}
+          onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} onForgotPassword={sendPasswordReset} authError={authError} user={user} />
+        <Toast msg={toast} />
+        <UpdateBanner show={updateAvailable} />
+      </>
+    );
   }
 
   return (
