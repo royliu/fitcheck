@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260712192333";
+const APP_VERSION = "20260713131338";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -570,16 +570,63 @@ function classifyColor(r,g,b){
   if(h>=258&&h<295)return"Purple";
   return(v>0.8&&s<0.55)?"Light Pink":"Pink";
 }
-/* Dominant quantized color across one or more sample regions of the source. */
+/* Is this pixel plausibly bare skin (a hand holding the item up, an arm, neck)?
+   Deliberately broad in hue/brightness so it catches most skin tones — the
+   caller guards against nuking skin-COLORED garments by only acting on skin
+   pixels when they're a minority of the patch (see sampleDominant). */
+function isSkinPixel(r,g,b){
+  const [h,s,v]=rgb2hsv(r,g,b);
+  return h>=5&&h<=45 && s>=0.15&&s<=0.68 && v>=0.30&&v<=0.98;
+}
+/* Dominant quantized color across one or more sample regions of the source.
+   Before voting, throw out the pixels most likely to be LYING about the
+   garment's real color:
+     • the brightest ones  — specular glare / blown highlights off shiny fabric
+     • the darkest ones    — deep fold-shadows and creases
+     • bare-skin pixels    — a hand or arm when the item is held up (but ONLY
+                             when skin is a minority, so a genuinely tan/beige/
+                             brown garment isn't destroyed by its own color)
+   Those all drag the result toward "too light", "too dark/grayish", or "too
+   skin-toned", which is most of why colors came out "close but wrong". We keep
+   the calm middle band, then take the most-populated quantized bucket among the
+   survivors. This only ever REMOVES suspect pixels — it never re-tints the
+   image, so unlike gray-world white balance it can't turn a real pastel gray. */
 function sampleDominant(sx, regions){
-  const buckets=new Map();
+  // 1) Gather every sampled pixel together with its perceptual brightness.
+  const px=[];
   for(const [rx,ry,rw,rh] of regions){
     if(rw<1||rh<1) continue;
     const id=sx.getImageData(rx,ry,rw,rh).data;
     for(let p=0;p<id.length;p+=4){
-      const key=(id[p]>>5)+"_"+(id[p+1]>>5)+"_"+(id[p+2]>>5);
-      const e=buckets.get(key)||[0,0,0,0]; e[0]+=id[p];e[1]+=id[p+1];e[2]+=id[p+2];e[3]++; buckets.set(key,e);
+      const r=id[p],g=id[p+1],b=id[p+2];
+      px.push([r,g,b, 0.299*r+0.587*g+0.114*b]);
     }
+  }
+  if(!px.length) return null;
+  // 2) Trim brightness outliers — drop the darkest ~18% (shadows/folds) and
+  //    brightest ~18% (glare), but only when there are enough pixels for that
+  //    to be meaningful, and never trim the pool down to nothing.
+  let pool=px;
+  if(px.length>=25){
+    const ys=px.map(q=>q[3]).sort((a,b)=>a-b);
+    const lo=ys[Math.floor(px.length*0.18)], hi=ys[Math.ceil(px.length*0.82)-1];
+    const trimmed=px.filter(q=>q[3]>=lo&&q[3]<=hi);
+    if(trimmed.length>=8) pool=trimmed;
+  }
+  // 3) Guarded skin rejection — if skin-toned pixels are a MINORITY of the
+  //    patch (<50%), they're contamination (a hand holding up the garment), so
+  //    drop them. If they're the majority, the garment itself is skin-toned
+  //    (tan/beige/brown/cream) and we must keep them or we'd read the wrong color.
+  const skinCount=pool.reduce((n,q)=>n+(isSkinPixel(q[0],q[1],q[2])?1:0),0);
+  if(skinCount>0 && skinCount<pool.length*0.50){
+    const ns=pool.filter(q=>!isSkinPixel(q[0],q[1],q[2]));
+    if(ns.length>=8) pool=ns;
+  }
+  // 4) Vote by quantized 5-bit bucket over the surviving pixels.
+  const buckets=new Map();
+  for(const [r,g,b] of pool){
+    const key=(r>>5)+"_"+(g>>5)+"_"+(b>>5);
+    const e=buckets.get(key)||[0,0,0,0]; e[0]+=r;e[1]+=g;e[2]+=b;e[3]++; buckets.set(key,e);
   }
   let best=null; for(const e of buckets.values()){ if(!best||e[3]>best[3]) best=e; }
   return best?[best[0]/best[3],best[1]/best[3],best[2]/best[3]]:null;
