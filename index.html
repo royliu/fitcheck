@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260712160354";
+const APP_VERSION = "20260712191117";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -202,7 +202,9 @@ const DET_SHORTEST = 640, DET_LONGEST = 1333, DET_THRESHOLD = 0.3;
 // --- model-load progress (so the scan screen can show a real % bar) ---
 let _dlDet = 0, _dlClip = 0, _dlSeg = 0;
 const _mpSubs = new Set();
-function modelProgress(){ return 0.5 * _dlDet + 0.2 * _dlClip + 0.3 * _dlSeg; }
+// Segmentation's own progress only counts toward the bar while it's actually
+// enabled — otherwise _dlSeg never leaves 0 and the bar could never reach 100%.
+function modelProgress(){ return SEGMENTATION_ENABLED ? (0.5 * _dlDet + 0.2 * _dlClip + 0.3 * _dlSeg) : (0.65 * _dlDet + 0.35 * _dlClip); }
 function emitModelProgress(){ const p = modelProgress(); _mpSubs.forEach((f) => f(p)); }
 function onModelProgress(fn){ _mpSubs.add(fn); fn(modelProgress()); return () => _mpSubs.delete(fn); }
 
@@ -348,7 +350,20 @@ async function refineLabels(items, onStage){
    very cleanly for this), it's ALSO used to show the garment cut out on a white
    background in the closet. Worn-on-body shots — where hair/skin/other garments
    bleed into the box — usually don't clear that bar, and just keep the plain
-   rectangular crop instead of a jagged low-confidence cutout. Best-effort. */
+   rectangular crop instead of a jagged low-confidence cutout. Best-effort.
+   DISABLED for now: this segmentation model (a THIRD WASM model alongside the
+   detector and CLIP) kept crashing phones at this exact "Polishing photos"
+   stage even after several rounds of real fixes (removed a synchronous
+   pixel-loop bug, cut per-pixel cost ~6x, deferred the expensive cutout
+   render to only when it'd be used, released each model right after its own
+   stage, shrunk its own input resolution 1024->512px) — it still recurred,
+   which points at the model itself being too heavy for at least one real
+   device, not the code around it. Color naming falls back to the plain
+   rectangular crop's dominant-color sample (already computed in
+   detectGarments regardless) and every item keeps its normal enhanced photo
+   instead of a white-background cutout. Flip back to true to re-enable once
+   there's a lighter way to run this (or evidence it's fine on real phones). */
+const SEGMENTATION_ENABLED = false;
 const SEG_CLASSES = {
   top:["Upper-clothes"], outer:["Upper-clothes"], bottom:["Skirt","Pants"],
   dress:["Dress"], shoes:["Left-shoe","Right-shoe"], bag:["Bag"], hat:["Hat"],
@@ -715,7 +730,9 @@ async function detectGarments(dataUrl,onStage,corrections,fullUrl){
   // Cut out the garment FIRST (removes background + neighbouring clothes), THEN
   // read colour and type from those clean pixels — far more accurate than the raw
   // rectangular crop, which bleeds in skin, background and adjacent garments.
-  await cutoutItems(items, sc, W, H, onStage);
+  // (Disabled for now — see SEGMENTATION_ENABLED. Items keep their plain
+  // enhanced crop and the dominant-color guess already sampled above.)
+  if(SEGMENTATION_ENABLED) await cutoutItems(items, sc, W, H, onStage);
   await refineLabels(items,onStage);
   // Apply the user's own learned corrections (e.g. "this type is Outerwear, not
   // Tops") so a fix they made once sticks on every future scan.
