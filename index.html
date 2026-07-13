@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260713132134";
+const APP_VERSION = "20260713134523";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -280,7 +280,11 @@ const DETAIL_CANDIDATES = {
   bottom:["denim jeans","skinny jeans","wide-leg jeans","trousers","leggings","sweatpants","cargo pants","mini skirt","midi skirt","pleated skirt","denim shorts","shorts"],
   dress:["mini dress","midi dress","maxi dress","slip dress","shirt dress","sundress","knit dress","bodycon dress"],
   outer:["denim jacket","leather jacket","blazer","bomber jacket","puffer jacket","trench coat","wool coat","cardigan","windbreaker"],
-  shoes:["sneakers","boots","ankle boots","heels","sandals","loafers","ballet flats","mary janes","mules","socks"],
+  // Footwear candidates are [clipPhrase, displayNoun] pairs: CLIP scores the
+  // grammatical phrase ("a photo of a pair of sneakers"), but we store the short
+  // noun. The old bare-plural candidates ("a photo of a sneakers") embedded
+  // poorly and blurred shoe-vs-shoe and shoe-vs-sock discrimination.
+  shoes:[["pair of sneakers","Sneakers"],["pair of boots","Boots"],["pair of ankle boots","Ankle Boots"],["pair of high heels","Heels"],["pair of sandals","Sandals"],["pair of loafers","Loafers"],["pair of ballet flats","Ballet Flats"],["pair of mary jane shoes","Mary Janes"],["pair of mules","Mules"],["pair of socks","Socks"]],
   bag:["shoulder bag","tote bag","crossbody bag","backpack","clutch","handbag","mini bag"],
   hat:["beanie","baseball cap","bucket hat","beret","wide-brim hat"],
 };
@@ -329,23 +333,40 @@ async function refineLabels(items, onStage){
     const tmpls=["a photo of a {}","a close-up photo of a {}, a type of clothing"];
     for(const it of items){
       const cand=DETAIL_CANDIDATES[it.detLabel]; if(!cand) continue;
+      // Candidates are either plain strings (the label doubles as the CLIP
+      // phrase) or [clipPhrase, displayNoun] pairs (footwear). Score the phrases,
+      // then map the winner back to its short noun.
+      const prompts=cand.map(c=>Array.isArray(c)?c[0]:c);
+      const nounFor=(p)=>{ const m=cand.find(c=>Array.isArray(c)&&c[0]===p); return m?m[1]:titleCase(p); };
       const src=it.clfPhoto||it.photo;                 // flattened cutout when available
       // Ensemble a couple of prompt templates and average — steadier on lookalikes
       // like t-shirt vs polo than a single prompt.
       const agg=new Map();
       for(const t of tmpls){
-        const out=await clf(src, cand, { hypothesis_template:t });
+        const out=await clf(src, prompts, { hypothesis_template:t });
         for(const r of out) agg.set(r.label,(agg.get(r.label)||0)+r.score);
       }
       let lbl=null,sum=-1; for(const [l,s] of agg){ if(s>sum){ sum=s; lbl=l; } }
-      if(lbl && sum/tmpls.length>0.17){
-        it.noun=titleCase(lbl); it.name=it.color+" "+it.noun;
-        // Socks aren't a detector class — when the detail model reads a "shoes"
-        // box as socks, file it under Accessories › Socks instead of Shoes.
-        if(lbl==="socks"){ it.category="Accessories"; it.subcategory="Socks"; }
-        // Hoodies / sweaters / cardigans belong in Outerwear, not Tops.
-        if(OUTER_TYPES.has(lbl)){ it.category="Outerwear"; it.subcategory=null; }
+      if(!lbl || sum/tmpls.length<=0.17) continue;
+      // Socks and shoes look nearly identical to a small on-device model, and a
+      // real shoe wrongly filed as "socks" (wrong CATEGORY — lands in Accessories)
+      // is more annoying than a sock left labeled as a shoe (one re-pick fixes it).
+      // So only accept a "socks" verdict when it CLEARLY beats the best actual
+      // footwear guess (≥25% higher), not on a hair's-width margin.
+      if(nounFor(lbl)==="Socks"){
+        let shoeBest=0; for(const [l,s] of agg){ if(nounFor(l)!=="Socks") shoeBest=Math.max(shoeBest,s); }
+        if(sum < shoeBest*1.25){
+          lbl=null; let bs=-1; for(const [l,s] of agg){ if(nounFor(l)!=="Socks" && s>bs){ bs=s; lbl=l; } }
+          if(!lbl) continue;
+        }
       }
+      const noun=nounFor(lbl);
+      it.noun=noun; it.name=it.color+" "+noun;
+      // Socks aren't a detector class — when the detail model confidently reads a
+      // "shoes" box as socks, file it under Accessories › Socks instead of Shoes.
+      if(noun==="Socks"){ it.category="Accessories"; it.subcategory="Socks"; }
+      // Hoodies / sweaters / cardigans belong in Outerwear, not Tops.
+      if(OUTER_TYPES.has(lbl)){ it.category="Outerwear"; it.subcategory=null; }
     }
   }catch(e){ /* keep coarse labels */ }
   // Classification's done — free it before the annotated overview photo and
