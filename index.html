@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260713141852";
+const APP_VERSION = "20260713142635";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -686,12 +686,17 @@ function sampleDominant(sx, regions){
     const trimmed=px.filter(q=>q[3]>=lo&&q[3]<=hi);
     if(trimmed.length>=8) pool=trimmed;
   }
-  // 3) Guarded skin rejection — if skin-toned pixels are a MINORITY of the
-  //    patch (<50%), they're contamination (a hand holding up the garment), so
-  //    drop them. If they're the majority, the garment itself is skin-toned
-  //    (tan/beige/brown/cream) and we must keep them or we'd read the wrong color.
+  // 3) Guarded skin rejection. Skin-toned pixels contaminate the reading two
+  //    ways: a hand holding an item up (skin is a small minority), and — worse —
+  //    a worn shot where the detector's box overshoots onto bare arms/chest/legs
+  //    (e.g. a long tee mis-boxed as a dress), landing the sample largely on
+  //    skin and reading a white shirt as "Orange". So drop skin whenever it's up
+  //    to ~70% of the patch; only KEEP it when it utterly dominates (>70%),
+  //    which is the signature of a genuinely skin-toned garment (tan/beige/
+  //    brown/cream fabric filling the frame) rather than contamination. Verified
+  //    against a real tan garment that samples ~84% skin-hued — safely kept.
   const skinCount=pool.reduce((n,q)=>n+(isSkinPixel(q[0],q[1],q[2])?1:0),0);
-  if(skinCount>0 && skinCount<pool.length*0.50){
+  if(skinCount>0 && skinCount<pool.length*0.70){
     const ns=pool.filter(q=>!isSkinPixel(q[0],q[1],q[2]));
     if(ns.length>=8) pool=ns;
   }
