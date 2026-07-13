@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260713141200";
+const APP_VERSION = "20260713141852";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -208,7 +208,33 @@ function modelProgress(){ return SEGMENTATION_ENABLED ? (0.5 * _dlDet + 0.2 * _d
 function emitModelProgress(){ const p = modelProgress(); _mpSubs.forEach((f) => f(p)); }
 function onModelProgress(fn){ _mpSubs.add(fn); fn(modelProgress()); return () => _mpSubs.delete(fn); }
 
+/* Import an ES module, trying several sources in order (the importmap's primary
+   specifier first, then explicit fallback CDNs), each with a couple of quick
+   retries. This is the fix for "importing a module script failed" in the iOS
+   home-screen web app: that install runs in its OWN cold, sandboxed cache and is
+   stricter about cross-origin module fetches, so a single CDN hiccup on esm.sh
+   would hard-fail the whole scan with no recovery. If EVERY source fails we throw
+   a tagged error the UI turns into a friendly "check your connection" message. */
+async function importWithFallback(sources){
+  let lastErr=null;
+  for(const src of sources){
+    for(let attempt=0; attempt<2; attempt++){
+      try{ return await import(src); }
+      catch(e){ lastErr=e; await new Promise((r)=>setTimeout(r, 350*(attempt+1))); }
+    }
+  }
+  const err=new Error("MODEL_LOAD_FAILED"); err.isModelLoad=true; err.cause=lastErr; throw err;
+}
 let _ort = null, _ortSession = null, _ortLoadPromise = null;
+/* Load (and cache) the onnxruntime-web MODULE only — not a session. Cheap enough
+   (a few MB of JS, no model weights) to run at launch even on a phone. */
+async function loadOrt(onStage){
+  if(_ort) return _ort;
+  onStage && onStage("Loading AI model…");
+  _ort = await importWithFallback(["onnxruntime-web","https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/+esm"]);
+  try{ _ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/"; }catch(e){}
+  return _ort;
+}
 /* The app warms this up silently in the background the moment it opens, AND a
    real scan calls this too. Without a guard, taking a photo quickly (e.g. during
    onboarding) races the background warm-up: both calls see "not loaded yet" and
@@ -219,11 +245,7 @@ async function getDetector(onStage) {
   if (_ortSession) return _ortSession;
   if (_ortLoadPromise) return _ortLoadPromise;
   _ortLoadPromise = (async () => {
-    if (!_ort) {
-      onStage && onStage("Loading AI model…");
-      _ort = await import("onnxruntime-web");
-      _ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
-    }
+    await loadOrt(onStage);
     onStage && onStage("Loading AI model…");
     let buf = null;
     try {
@@ -296,13 +318,24 @@ const OUTER_TYPES = new Set(["hoodie","sweatshirt","knit sweater","sweater","car
    NOT included here since those pair fine over a dress. */
 const CASUAL_LAYER_RE = /hoodie|sweatshirt|sweater/i;
 let _clipMod=null,_clip=null,_clipLoadPromise=null;
+/* Load (and cache) the transformers.js MODULE only — not a pipeline. Cheap
+   (JS bundle, no model weights), so it's safe to prewarm at launch on a phone;
+   the memory-heavy pipeline() stays deferred to scan time. Uses the same
+   fallback-CDN import as the detector so a flaky esm.sh doesn't dead-end. */
+async function loadTransformers(onStage){
+  if(_clipMod) return _clipMod;
+  onStage && onStage("Loading detail model…");
+  _clipMod = await importWithFallback(["@huggingface/transformers","https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3/+esm"]);
+  try{ _clipMod.env.allowLocalModels=false; }catch(e){}
+  return _clipMod;
+}
 // Same race guard as getDetector() — the background warm-up and an actual scan
 // can both call this before either has finished, doubling the load.
 async function getClassifier(onStage){
   if(_clip) return _clip;
   if(_clipLoadPromise) return _clipLoadPromise;
   _clipLoadPromise=(async()=>{
-    if(!_clipMod){ onStage&&onStage("Loading detail model…"); _clipMod=await import("@huggingface/transformers"); _clipMod.env.allowLocalModels=false; }
+    await loadTransformers(onStage);
     // dtype:"q8" — load the 8-bit QUANTIZED CLIP weights (~150MB) instead of
     // transformers.js v3's default full-precision fp32 (~600MB). That 4x cut is
     // the difference between a phone surviving this stage and not: this is a
@@ -323,6 +356,14 @@ async function getClassifier(onStage){
   try{ return await _clipLoadPromise; } finally { _clipLoadPromise=null; }
 }
 async function releaseClassifier(){ try{ if(_clip&&_clip.dispose) await _clip.dispose(); }catch(e){} _clip=null; }
+/* Pre-IMPORT both model libraries at launch — NOT their sessions/pipelines. The
+   cross-origin module fetch is the exact thing that throws "importing a module
+   script failed" in the standalone web app, so doing it up front (while the user
+   is still on early screens) means it's already cached and past its retries by
+   the time they scan. Crucially it does NOT create a session/pipeline, so it
+   allocates only a few MB of JS — safe to run during onboarding on a phone,
+   unlike the ~170MB model sessions which stay deferred. Fully best-effort. */
+function prewarmModelModules(){ loadOrt().catch(()=>{}); loadTransformers().catch(()=>{}); }
 function titleCase(s){ return s.replace(/\b\w/g,c=>c.toUpperCase()); }
 /* Refine each item's noun into a detailed garment type. Best-effort: keeps the
    coarse label if the detail model is unsure or fails to load. */
@@ -2564,7 +2605,14 @@ function CameraTab({ onAdd, active, corrections, onCorrect, compact }) {
       if (annotated) setPhoto(annotated); // show the labeled boxes over the photo
       if (!items.length) setError("No items found — make sure the WHOLE item is in the frame and step back a bit. A close-up of just part of an item won't be recognized.");
     } catch (e) {
-      setError((e && e.message) || "Something went wrong while scanning.");
+      // A failed cross-origin module import (common in the standalone web app)
+      // surfaces as a cryptic "importing a module script failed" — turn that (and
+      // our own tagged MODEL_LOAD_FAILED) into something a user can act on.
+      const raw = (e && e.message) || "";
+      const isLoad = (e && e.isModelLoad) || /module script|importing a module|dynamically imported|Failed to fetch|Load failed/i.test(raw);
+      setError(isLoad
+        ? "Couldn't load the styling tools — this usually means a weak connection. Tap Try again."
+        : (raw || "Something went wrong while scanning."));
     } finally {
       setScanning(false);
       clearScanStage();   // finished (success or caught error) — no longer "interrupted"
@@ -3912,6 +3960,14 @@ function App() {
       setTimeout(() => showToast(`Your last scan was interrupted during "${interrupted.stage}" — please try again`), 600);
     }
   }, [hydrated]);
+
+  // Pre-import the model LIBRARIES (just the JS, not the memory-heavy sessions)
+  // the moment the app opens, even during onboarding. This is what makes the
+  // first onboarding scan reliable in the standalone home-screen web app: the
+  // fragile cross-origin module fetch that throws "importing a module script
+  // failed" happens now, with retries + a fallback CDN, while the user is still
+  // reading early screens — instead of on the critical path of their first scan.
+  useEffect(() => { prewarmModelModules(); }, []);
 
   // Warm up BOTH AI models in the background once onboarding is actually done —
   // NOT the instant the app opens. Eagerly downloading+initializing a ~174MB
