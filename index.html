@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260713134523";
+const APP_VERSION = "20260713135055";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -3713,9 +3713,24 @@ function App() {
         if (cloud.exists) {
           setOnboarded(true);
           setPrefs({ ...defaultPrefs(), ...cloud.prefs });
-          setCloset(cloud.closet);
-          setTrash(cloud.trash);
-          setFavorites(cloud.favorites);
+          // MERGE, don't overwrite. Anything added while signed out — most
+          // importantly the photo(s) taken during onboarding before logging in —
+          // lives in the local (guest) collections right now. If we just replaced
+          // them with the cloud copy, those guest items would silently vanish the
+          // instant an existing account's data loaded (exactly the reported bug).
+          // So union by id: the account's cloud items are the base, and any local
+          // item whose id isn't already up there is a guest addition we keep. The
+          // debounced push effect below then uploads those extras to the account
+          // (cloudIdsRef is seeded with the ORIGINAL cloud ids, so the sync sees
+          // the extras as new and adds them — while deleting nothing).
+          const mergeById = (cloudArr, localArr) => {
+            const have = new Set((cloudArr || []).map((i) => i.id));
+            const extras = (localArr || []).filter((i) => i && i.id && !have.has(i.id));
+            return [...extras, ...(cloudArr || [])];
+          };
+          setCloset(mergeById(cloud.closet, closet));
+          setTrash(mergeById(cloud.trash, trash));
+          setFavorites(mergeById(cloud.favorites, favorites));
           cloudIdsRef.current = {
             closet: new Set(cloud.closet.map((i) => i.id)),
             trash: new Set(cloud.trash.map((i) => i.id)),
