@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260713140801";
+const APP_VERSION = "20260713141200";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -2713,7 +2713,7 @@ function CameraTab({ onAdd, active, corrections, onCorrect, compact }) {
           <div className="text-[13.5px] font-bold" style={{ color: "#CC8567" }}>{error}</div>
           <div className="flex items-center justify-center gap-4 mt-2">
             {photo && <button onClick={addManual} className="text-[13px] font-extrabold" style={{ color: "#C56B96" }}>Add it manually</button>}
-            <button onClick={retake} className="text-[13px] font-extrabold" style={{ color: "#C99BB5" }}>Try again</button>
+            <button onClick={retake} className="text-[13px] font-extrabold" style={{ color: "#C56B96" }}>Try again</button>
           </div>
         </div>
       )}
