@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260713131338";
+const APP_VERSION = "20260713132134";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -299,7 +299,18 @@ async function getClassifier(onStage){
   if(_clipLoadPromise) return _clipLoadPromise;
   _clipLoadPromise=(async()=>{
     if(!_clipMod){ onStage&&onStage("Loading detail model…"); _clipMod=await import("@huggingface/transformers"); _clipMod.env.allowLocalModels=false; }
+    // dtype:"q8" — load the 8-bit QUANTIZED CLIP weights (~150MB) instead of
+    // transformers.js v3's default full-precision fp32 (~600MB). That 4x cut is
+    // the difference between a phone surviving this stage and not: this is a
+    // SECOND WASM runtime whose heap stacks on top of the detector's (WASM heaps
+    // never shrink back to the OS, so releasing the detector session doesn't
+    // hand the memory back), and full-precision CLIP alone was enough to push a
+    // real phone's Safari tab over its limit and reload it — the crash simply
+    // moved here from "Polishing photos" once segmentation was disabled, because
+    // this became the first heavy second-model to load. q8 keeps the detailed
+    // garment naming working while making its memory footprint phone-safe. */
     _clip=await _clipMod.pipeline("zero-shot-image-classification","Xenova/clip-vit-base-patch32",{
+      dtype:"q8",
       progress_callback:(x)=>{ if(x&&x.status==="progress"&&x.total){ _dlClip=Math.min(1,(x.loaded||0)/x.total); emitModelProgress(); } },
     });
     _dlClip=1; emitModelProgress();
