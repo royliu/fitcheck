@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260713135055";
+const APP_VERSION = "20260713135834";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -3712,7 +3712,14 @@ function App() {
         if (cancelled) return;
         if (cloud.exists) {
           setOnboarded(true);
-          setPrefs({ ...defaultPrefs(), ...cloud.prefs });
+          // Preferences come from the account (its baseStyle Cali/Korean, plan,
+          // ratings, etc. are the source of truth) — EXCEPT aesthetics, which we
+          // UNION with whatever the guest just picked. So an account set to
+          // "streetwear" + a guest who picked "minimalist" ends up with both,
+          // not one clobbering the other. (Deduped; the debounced push below
+          // then saves the combined set back to the account.)
+          const mergedAesthetics = Array.from(new Set([...(cloud.prefs.aesthetics || []), ...(prefs.aesthetics || [])]));
+          setPrefs({ ...defaultPrefs(), ...cloud.prefs, aesthetics: mergedAesthetics });
           // MERGE, don't overwrite. Anything added while signed out — most
           // importantly the photo(s) taken during onboarding before logging in —
           // lives in the local (guest) collections right now. If we just replaced
