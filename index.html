@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260712191117";
+const APP_VERSION = "20260712192333";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -538,7 +538,14 @@ function whiteBalanceGains(srcCanvas){
   c.getContext("2d").drawImage(srcCanvas,0,0,32,32);
   const d=c.getContext("2d").getImageData(0,0,32,32).data;let r=0,g=0,b=0,n=0;
   for(let p=0;p<d.length;p+=4){r+=d[p];g+=d[p+1];b+=d[p+2];n++;}
-  r/=n;g/=n;b/=n;const gray=(r+g+b)/3,cl=x=>Math.max(0.78,Math.min(1.3,x));
+  r/=n;g/=n;b/=n;const gray=(r+g+b)/3;
+  // Gray-world assumes the WHOLE photo averages out to neutral — true for a
+  // typical room, false for a tight crop where one saturated garment fills
+  // most of the frame (a real pink coat, say). A wide gain range "corrects"
+  // that real color away toward gray. Clamped tight (was 0.78-1.3) so this
+  // still nudges out a mild warm/cool cast without having enough power to
+  // wash out a garment's own genuine saturated color.
+  const cl=x=>Math.max(0.92,Math.min(1.1,x));
   return [cl(gray/(r||1)),cl(gray/(g||1)),cl(gray/(b||1))];
 }
 /* Name a color from HSV — hue is far more stable under brightness changes than RGB. */
