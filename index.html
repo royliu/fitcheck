@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260713142635";
+const APP_VERSION = "20260714131104";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -3974,16 +3974,22 @@ function App() {
   // reading early screens — instead of on the critical path of their first scan.
   useEffect(() => { prewarmModelModules(); }, []);
 
-  // Warm up BOTH AI models in the background once onboarding is actually done —
-  // NOT the instant the app opens. Eagerly downloading+initializing a ~174MB
-  // WASM model while a brand-new user is still on the very first onboarding
-  // screens (picking Cali/Korean, picking aesthetics) competes for memory at
-  // exactly the moment a phone's Safari is most likely to kill the tab for it.
-  // A returning (already-onboarded) user still gets the same "warm before you
-  // need it" benefit, since this fires the moment hydration confirms that.
+  // Warm up ONLY the detector in the background once onboarding is done — NOT
+  // the instant the app opens, and NOT both models at once. The previous version
+  // ran getDetector() and getClassifier() together via Promise.allSettled, which
+  // for a signed-in/returning user (onboarded=true on launch) meant the app open
+  // kicked off downloading + INSTANTIATING two heavy WASM runtimes in parallel
+  // (~167MB detector + ~150MB CLIP). WASM heaps don't shrink, so that's ~317MB
+  // resident plus the transient double-instantiation spike — and if the user
+  // tapped scan mid-warm-up, the scan's own load piled on top. That parallel
+  // spike is the crash that "came back" at a loading stage once testing moved
+  // from the onboarding flow (where this effect never ran) to a logged-in
+  // account. Now we warm just the detector; CLIP loads lazily during the scan's
+  // "Naming your pieces" step (the scan already releases the detector session
+  // first), so the two heavy sessions never instantiate simultaneously.
   useEffect(() => {
     if (!hydrated || !onboarded) return;
-    (async () => { try { await Promise.allSettled([getDetector(), getClassifier()]); } catch (e) { /* ignore */ } })();
+    (async () => { try { await getDetector(); } catch (e) { /* ignore */ } })();
   }, [hydrated, onboarded]);
 
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 1800); };
