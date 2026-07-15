@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260715124505";
+const APP_VERSION = "20260715125652";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -249,25 +249,27 @@ async function getDetector(onStage) {
     onStage && onStage("Loading AI model…");
     let buf = null;
     try {
-      let received = 0; const chunks = [];
+      // Stream both parts DIRECTLY into one pre-sized buffer (the exact total is
+      // known). The old path held an array of every chunk AND a separate
+      // concatenated copy — that extra ~100MB, stacked under the parsed session
+      // InferenceSession.create builds, was a big slice of the cold-load memory
+      // spike that reloads the tab mid-scan on a phone.
+      const u8 = new Uint8Array(DETECTOR_TOTAL); let off = 0;
+      const put = (v) => {
+        if (off + v.length > u8.length) throw new Error("detector size overflow");
+        u8.set(v, off); off += v.length;
+        _dlDet = Math.min(1, off / DETECTOR_TOTAL); emitModelProgress();
+      };
       for (const url of DETECTOR_PARTS) {
         const resp = await fetch(url);
         if (resp.body && resp.body.getReader) {
           const reader = resp.body.getReader();
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            chunks.push(value); received += value.length;
-            _dlDet = Math.min(1, received / DETECTOR_TOTAL); emitModelProgress();
-          }
+          for (;;) { const { done, value } = await reader.read(); if (done) break; put(value); }
         } else {
-          const ab = new Uint8Array(await resp.arrayBuffer());
-          chunks.push(ab); received += ab.length;
-          _dlDet = Math.min(1, received / DETECTOR_TOTAL); emitModelProgress();
+          put(new Uint8Array(await resp.arrayBuffer()));
         }
       }
-      const u8 = new Uint8Array(received); let off = 0;
-      for (const c of chunks) { u8.set(c, off); off += c.length; }
+      if (off !== DETECTOR_TOTAL) throw new Error("detector size mismatch");
       buf = u8.buffer;
       _dlDet = 1; emitModelProgress();
     } catch (e) { buf = null; }
@@ -2561,6 +2563,19 @@ function CameraTab({ onAdd, active, corrections, onCorrect, compact }) {
     const next = Math.max(prev, p);
     return Math.round(next * 100) === Math.round(prev * 100) ? prev : next;
   })), []);
+
+  // Warm the detector the instant the camera screen opens, so the FIRST scan
+  // runs inference on an ALREADY-LOADED model. This matters most during
+  // onboarding: the app-level warm-up is gated on `onboarded`, so before this a
+  // brand-new user's first scan cold-loaded the model AND ran inference at the
+  // same instant — the cold-load transient (download buffer + copy + parsed
+  // session) stacked under the inference activations is the memory spike that
+  // reloaded the tab mid-scan. Post-onboarding scans never hit this because the
+  // model is already warm, which is exactly why they didn't crash. Warming on
+  // camera-open (while the user is still framing the shot) spreads that load out
+  // so it isn't piled on top of inference. Best-effort; the scan awaits the same
+  // in-flight load via getDetector()'s promise guard.
+  useEffect(() => { if (active) getDetector().catch(() => {}); }, [active]);
 
   const setItemCategory = (i, category, subcategory) => {
     const sub = category === "Accessories" ? (subcategory || (results && results[i] && results[i].subcategory) || "Jewelry") : null;
