@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260715125652";
+const APP_VERSION = "20260715130647";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -3660,9 +3660,11 @@ function ProfileTab({ aesthetics, setAesthetics, favorites, toggleFav, tryNew, s
             <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center mb-4" style={{ background: "#FCEDE6" }}>
               <RotateCcw size={24} color="#CC8567" />
             </div>
-            <div className="text-[18px] font-black text-center mb-2" style={{ color: "#5A5167" }}>Reset all your data?</div>
+            <div className="text-[18px] font-black text-center mb-2" style={{ color: "#5A5167" }}>{user ? "Restart FitCheck?" : "Reset all your data?"}</div>
             <p className="text-[13.5px] font-semibold text-center leading-relaxed mb-5" style={{ color: "#A99FB5" }}>
-              This erases your closet, ratings, favorites, and preferences and starts FitCheck fresh, like the very first time you opened it. This can't be undone.
+              {user
+                ? "This signs you out and clears FitCheck on this device, starting fresh like the very first time. Your closet, ratings, and preferences stay saved in your account — sign back in anytime to restore them."
+                : "This erases your closet, ratings, favorites, and preferences and starts FitCheck fresh, like the very first time you opened it. This can't be undone."}
             </p>
             <div className="flex gap-2.5">
               <button onClick={() => setResetConfirmOpen(false)}
@@ -4034,7 +4036,13 @@ function App() {
 
   // Restart — wipe everything (IndexedDB + the old localStorage key) and reload,
   // so the app comes back up exactly like a brand-new install.
-  const handleReset = () => {
+  const handleReset = async () => {
+    // Sign out first. Otherwise, for a logged-in user, the reload immediately
+    // re-pulls their account (onboarded=true, closet, prefs) from the cloud and
+    // drops them straight back into the main app — so wiping local data looks
+    // like it did nothing. Their cloud account ISN'T deleted; signing back in
+    // restores it. This makes Restart genuinely return to onboarding.
+    try { await signOut(auth); } catch (e) {}
     try { localStorage.removeItem(STATE_LS); } catch (e) {}
     try {
       const req = indexedDB.deleteDatabase("fitcheck");
