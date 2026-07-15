@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260714131104";
+const APP_VERSION = "20260715124505";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -184,7 +184,7 @@ const SEED_TRASH = [];
 // The 167MB model is split into <100MB parts (GitHub's per-file limit) and
 // stitched back together at load time.
 const DETECTOR_PARTS = ["./fashion-detector.onnx.part0", "./fashion-detector.onnx.part1"];
-const DETECTOR_TOTAL = 174424033;
+const DETECTOR_TOTAL = 103009465;
 const DETECTOR_URL = (typeof window !== "undefined" && window.FITCHECK_MODEL_URL) || "./fashion-detector.onnx";
 const DET_LABELS = ["bag", "bottom", "dress", "hat", "outer", "shoes", "top"];
 const DET_MAP = {
@@ -1282,8 +1282,12 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
   const iScore=id=>(fb.item&&fb.item[id])||0;
 
   // Aesthetic plan for the 5 looks — drop strongly-disliked aesthetics and lead
-  // with the ones the user has rated highest.
-  const likedArr=[...likedAesthetics].filter(a=>aScore(a)>-3);
+  // with the ones the user has rated highest. Also filter to aesthetics that
+  // still EXIST in the current AESTHETICS list: a favorited outfit or saved pick
+  // from an older build can carry a retired label (e.g. "Soft Girl", "Clean
+  // Girl"), and without this those stale names leak back out as freshly
+  // generated outfits.
+  const likedArr=[...likedAesthetics].filter(a=>AESTHETICS.includes(a)&&aScore(a)>-3);
   const preferred=(likedArr.length?likedArr:["Minimalist","Coquette","Streetwear"]).slice().sort((a,b)=>aScore(b)-aScore(a));
   const others=AESTHETICS.filter(a=>!likedAesthetics.has(a)&&aScore(a)>-2).sort((a,b)=>aScore(b)-aScore(a));
   const plan=[];
