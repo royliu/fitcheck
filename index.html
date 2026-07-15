@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260715130647";
+const APP_VERSION = "20260715132649";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -1534,6 +1534,24 @@ async function syncCloudCollection(uid, name, items, prevIds){
 async function pushCloudMain(uid, prefs, onboarded){
   const { styleBoard, ...rest } = prefs || {};
   await setDoc(doc(db, "users", uid), { prefs: rest, onboarded, updatedAt: serverTimestamp() }, { merge: true });
+}
+/* FULL account wipe for a factory Restart: delete every doc in each sub-collection,
+   then the main users/{uid} doc. MUST run while still signed in — the security
+   rules only allow a user to delete their own docs (request.auth.uid == userId),
+   so the caller deletes here BEFORE signing out. Batches are chunked under
+   Firestore's 500-op limit. After this, signing back in finds no doc and is
+   treated as a brand-new account. */
+async function deleteCloudAccount(uid){
+  for (const name of CLOUD_SUBCOLLECTIONS){
+    const snap = await getDocs(collection(db, "users", uid, name));
+    let batch = writeBatch(db), n = 0;
+    for (const d of snap.docs){
+      batch.delete(d.ref); n++;
+      if (n >= 400){ await batch.commit(); batch = writeBatch(db); n = 0; }
+    }
+    if (n > 0) await batch.commit();
+  }
+  await deleteDoc(doc(db, "users", uid));
 }
 
 
@@ -3660,10 +3678,10 @@ function ProfileTab({ aesthetics, setAesthetics, favorites, toggleFav, tryNew, s
             <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center mb-4" style={{ background: "#FCEDE6" }}>
               <RotateCcw size={24} color="#CC8567" />
             </div>
-            <div className="text-[18px] font-black text-center mb-2" style={{ color: "#5A5167" }}>{user ? "Restart FitCheck?" : "Reset all your data?"}</div>
+            <div className="text-[18px] font-black text-center mb-2" style={{ color: "#5A5167" }}>{user ? "Delete everything and restart?" : "Reset all your data?"}</div>
             <p className="text-[13.5px] font-semibold text-center leading-relaxed mb-5" style={{ color: "#A99FB5" }}>
               {user
-                ? "This signs you out and clears FitCheck on this device, starting fresh like the very first time. Your closet, ratings, and preferences stay saved in your account — sign back in anytime to restore them."
+                ? "This permanently deletes your closet, ratings, favorites, and preferences from your account — on every device — and signs you out. FitCheck starts fresh, like the very first time. This can't be undone."
                 : "This erases your closet, ratings, favorites, and preferences and starts FitCheck fresh, like the very first time you opened it. This can't be undone."}
             </p>
             <div className="flex gap-2.5">
@@ -4037,11 +4055,13 @@ function App() {
   // Restart — wipe everything (IndexedDB + the old localStorage key) and reload,
   // so the app comes back up exactly like a brand-new install.
   const handleReset = async () => {
-    // Sign out first. Otherwise, for a logged-in user, the reload immediately
-    // re-pulls their account (onboarded=true, closet, prefs) from the cloud and
-    // drops them straight back into the main app — so wiping local data looks
-    // like it did nothing. Their cloud account ISN'T deleted; signing back in
-    // restores it. This makes Restart genuinely return to onboarding.
+    // A factory Restart. For a signed-in user, FULLY wipe their cloud account
+    // FIRST (while still authenticated — the rules only let a user delete their
+    // own docs), so the reload can't just re-download everything. Then sign out
+    // and clear this device. Deleting before signing out also matters because
+    // the debounced push effect is disabled the moment `user` goes null, so
+    // nothing races to re-write the docs we just deleted.
+    try { if (user) await deleteCloudAccount(user.uid); } catch (e) {}
     try { await signOut(auth); } catch (e) {}
     try { localStorage.removeItem(STATE_LS); } catch (e) {}
     try {
