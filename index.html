@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260715132649";
+const APP_VERSION = "20260715135443";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -76,6 +76,11 @@ const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
 const googleProvider = new GoogleAuthProvider();
+// Always show Google's account chooser instead of silently reusing whichever
+// account the browser last signed in with — otherwise a user who just did a
+// factory Restart (or wants a different account) gets auto-logged back into the
+// previous one with no way to pick.
+googleProvider.setCustomParameters({ prompt: "select_account" });
 function friendlyAuthError(e){
   const code = e && e.code || "";
   if (code.includes("email-already-in-use")) return "That email already has an account — try logging in instead.";
