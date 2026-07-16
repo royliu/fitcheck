@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260715135443";
+const APP_VERSION = "20260716164532";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -320,6 +320,36 @@ const DETAIL_CANDIDATES = {
 /* Layering pieces that should live in Outerwear even when the detector boxed them
    as a "top". */
 const OUTER_TYPES = new Set(["hoodie","sweatshirt","knit sweater","sweater","cardigan"]);
+/* Every garment TYPE this app can name, lowercased — both the detail model's
+   candidates and the detector's own coarse nouns. Used as the vocabulary that
+   decides whether a manual rename is a real TYPE correction worth learning. */
+const KNOWN_NOUNS = (() => {
+  const s = new Set();
+  for (const arr of Object.values(DETAIL_CANDIDATES))
+    for (const c of arr) s.add(String(Array.isArray(c) ? c[1] : c).toLowerCase());
+  for (const m of Object.values(DET_MAP)) s.add(String(m.noun).toLowerCase());
+  return s;
+})();
+/* Pull a garment TYPE out of a freeform rename: "Brown Henley Shirt" -> "henley
+   shirt". Strips a leading colour word, then only accepts the remainder if it's
+   a type the detector actually knows. That way a genuine correction ("it's a
+   henley, not a blouse") teaches us, while a personal nickname ("my lucky
+   shirt") stays just this item's name and teaches nothing — which matters,
+   because the lesson is applied to EVERY future item of that type.
+   Returns null when the rename isn't a recognisable type correction. */
+function parseTypeFromName(name){
+  const t = String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!t) return null;
+  if (KNOWN_NOUNS.has(t)) return t;
+  for (const [c] of COLOR_CHOICES) {
+    const cw = c.toLowerCase();
+    if (t.startsWith(cw + " ")) {
+      const rest = t.slice(cw.length + 1).trim();
+      if (KNOWN_NOUNS.has(rest)) return rest;
+    }
+  }
+  return null;
+}
 /* Casual bulky layers that look wrong thrown over a dress (a skirt+top combo is
    fine with these — only dresses are restricted). Cardigans/blazers/coats are
    NOT included here since those pair fine over a dress. */
@@ -874,11 +904,15 @@ async function detectGarments(dataUrl,onStage,corrections,fullUrl){
   if(SEGMENTATION_ENABLED) await cutoutItems(items, sc, W, H, onStage);
   await refineLabels(items,onStage);
   // Apply the user's own learned corrections (e.g. "this type is Outerwear, not
-  // Tops") so a fix they made once sticks on every future scan.
+  // Tops", or "what you call a Blouse is a Henley Shirt") so a fix they made
+  // once sticks on every future scan. NOTE: this does NOT make the detector
+  // smarter — it's a lookup table applied AFTER the frozen model has guessed.
   if(corrections){
     for(const it of items){
       const c=corrections[(it.noun||"").toLowerCase()];
-      if(c&&c.category){ it.category=c.category; it.subcategory=c.category==="Accessories"?(c.subcategory||null):null; }
+      if(!c) continue;
+      if(c.category){ it.category=c.category; it.subcategory=c.category==="Accessories"?(c.subcategory||null):null; }
+      if(c.noun){ it.noun=c.noun; it.name=it.color+" "+c.noun; }
     }
   }
   const annotated=items.length?annotatePhoto(img,W,H,items):null;
@@ -1416,6 +1450,37 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
 const STATE_LS = "fitcheck_state_v1";   // legacy localStorage key (migration only)
 const STATE_KEY = "state";
 const STYLE_STARS = 4;
+/* --- correction log (raw material for RETRAINING the detector, offline) ---
+   The on-device detector is a frozen file: it cannot learn, and nothing the user
+   does makes it more accurate. The corrections map only OVERRIDES its output
+   after the fact. To ever genuinely improve it you need labelled examples — an
+   image plus the right answer — so this quietly records, for each item the user
+   corrected before confirming, a small thumbnail + what we guessed + what they
+   made it. Local-only and never uploaded (they're photos of the user), capped so
+   it can't grow without bound, and exportable as JSON from Profile. */
+const TRAIN_KEY = "training";
+const TRAIN_MAX = 300;
+async function logTrainingCorrection(r){
+  try{
+    const ai = r && r._ai; if(!ai) return;
+    const truthType = parseTypeFromName(r.name);
+    const truthNoun = truthType ? titleCase(truthType) : (r.noun || null);
+    const changed = (ai.name !== r.name) || (ai.category !== r.category) ||
+      ((ai.subcategory||null) !== (r.subcategory||null)) || (ai.color !== r.color) ||
+      ((ai.noun||null) !== truthNoun);
+    if(!changed) return;   // user accepted our guess as-is — nothing to learn from
+    const thumb = await downscaleDataUrl(r.photo, 224).catch(()=>null);
+    const log = (await idbGet(TRAIN_KEY)) || [];
+    log.push({
+      at: Date.now(),
+      guess: { noun: ai.noun||null, category: ai.category||null, subcategory: ai.subcategory||null, color: ai.color||null, name: ai.name||null },
+      truth: { noun: truthNoun, category: r.category||null, subcategory: r.subcategory||null, color: r.color||null, name: r.name||null },
+      thumb,
+    });
+    while(log.length > TRAIN_MAX) log.shift();
+    await idbSet(TRAIN_KEY, log);
+  }catch(e){ /* logging must never break a scan */ }
+}
 function emptyFeedback(){ return { ratings:{}, aesthetic:{}, item:{}, corrections:{} }; }
 const bareAesthetic = (a) => { a = a || ""; const i = a.indexOf("· "); return (i >= 0 ? a.slice(i + 2) : a).trim(); };
 
@@ -2568,7 +2633,7 @@ function useCamera(active = true) {
   return { videoRef, canvasRef, camState, facing, startCamera, flipCamera, capture, stopStream };
 }
 
-function CameraTab({ onAdd, active, corrections, onCorrect, compact }) {
+function CameraTab({ onAdd, active, corrections, onCorrect, onLearnName, compact }) {
   const { videoRef, canvasRef, camState, facing, startCamera, flipCamera, capture, stopStream } = useCamera(active);
   const fileRef = useRef(null);
   const [scanning, setScanning] = useState(false);
@@ -2648,7 +2713,9 @@ function CameraTab({ onAdd, active, corrections, onCorrect, compact }) {
       setPhoto(safePhoto);
       const ds = await downscaleDataUrl(dataUrl, 1000);
       const { items, annotated } = await detectGarments(ds, stageAndMark, corrections, safePhoto);
-      setResults(items);
+      // Snapshot what we're about to SHOW them, so confirmAll can tell what they
+      // changed — that diff is both the lesson to learn and the training record.
+      setResults(items.map((it) => ({ ...it, _ai: { noun: it.noun || null, category: it.category, subcategory: it.subcategory || null, color: it.color, name: it.name } })));
       if (annotated) setPhoto(annotated); // show the labeled boxes over the photo
       if (!items.length) setError("No items found — make sure the WHOLE item is in the frame and step back a bit. A close-up of just part of an item won't be recognized.");
     } catch (e) {
@@ -2682,7 +2749,16 @@ function CameraTab({ onAdd, active, corrections, onCorrect, compact }) {
   };
 
   const confirmAll = () => {
-    (results || []).forEach((r) => onAdd({ name: r.name, category: r.category, subcategory: r.subcategory || null, color: r.color, photo: r.photo, id: uid(), fav: false, wash: false }));
+    (results || []).forEach((r) => {
+      // Learn from a rename only once the user COMMITS the item (not per
+      // keystroke): if they renamed it to a garment type we recognise, teach
+      // that mapping so the same mistake self-corrects next scan.
+      if (onLearnName && r._ai && r._ai.noun) onLearnName(r._ai.noun, r.name);
+      // Keep the labelled example — the only path to ever genuinely retraining
+      // the detector, which can't learn on-device. Fire-and-forget.
+      logTrainingCorrection(r);
+      onAdd({ name: r.name, category: r.category, subcategory: r.subcategory || null, color: r.color, photo: r.photo, id: uid(), fav: false, wash: false });
+    });
     setResults(null);
     setPhoto(null);
     setError(null);
@@ -2969,7 +3045,7 @@ function OnboardingProgress({ n }) {
     </div>
   );
 }
-function Onboarding({ onDone, onAddItem, corrections, onCorrect, onSignInGoogle, onSignUpEmail, onSignInEmail, onForgotPassword, authError, user }) {
+function Onboarding({ onDone, onAddItem, corrections, onCorrect, onLearnName, onSignInGoogle, onSignUpEmail, onSignInEmail, onForgotPassword, authError, user }) {
   const [step, setStep] = useState("base"); // base | aesthetic | closet | account
   const [base, setBase] = useState(null);   // "Cali" | "Korean"
   const [picked, setPicked] = useState([]);
@@ -3083,7 +3159,7 @@ function Onboarding({ onDone, onAddItem, corrections, onCorrect, onSignInGoogle,
               </div>
             </div>
             <div className="px-6">
-              <CameraTab active compact onAdd={handleAddItem} corrections={corrections} onCorrect={onCorrect} />
+              <CameraTab active compact onAdd={handleAddItem} corrections={corrections} onCorrect={onCorrect} onLearnName={onLearnName} />
             </div>
             <div className="px-6 pb-10 mt-0.5">
               {addedCount > 0 ? (
@@ -3224,6 +3300,22 @@ function ProfileTab({ aesthetics, setAesthetics, favorites, toggleFav, tryNew, s
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const [detail, setDetail] = useState(null);   // { outfit, pastel } — the single look opened full-size, shared by both mood boards
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  // Pull the local correction log out as a JSON file. This is the labelled data
+  // (thumbnail + what we guessed + what it really was) needed to retrain the
+  // detector offline — the on-device model itself can never learn.
+  const exportCorrections = async () => {
+    try {
+      const data = (await idbGet(TRAIN_KEY)) || [];
+      if (!data.length) { showToast && showToast("No AI corrections logged yet"); return; }
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "fitcheck-corrections.json";
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      showToast && showToast(`Exported ${plural(data.length, "correction")}`);
+    } catch (e) { showToast && showToast("Couldn't export those — try again"); }
+  };
   const toggle = (a) =>
     setAesthetics(aesthetics.includes(a) ? aesthetics.filter((x) => x !== a) : [...aesthetics, a]);
   // Avatar shown wherever the account picture appears: a custom FitCheck pick
@@ -3667,6 +3759,17 @@ function ProfileTab({ aesthetics, setAesthetics, favorites, toggleFav, tryNew, s
         </button>
       </div>
 
+      {/* Export the correction log — the labelled examples needed to retrain the
+          detector offline (it can't learn on-device). Local-only until exported. */}
+      <button onClick={exportCorrections}
+        className="w-full text-center rounded-3xl p-4 mt-10 text-[13px] font-extrabold active:scale-[0.98] transition-transform"
+        style={{ background: "#F1ECFB", color: "#8E78C0" }}>
+        Export AI corrections
+      </button>
+      <p className="text-[11.5px] font-semibold mt-2 mb-2 text-center leading-relaxed" style={{ color: "#C6BCD2" }}>
+        Downloads the fixes you've made to the AI's guesses, to train a smarter detector later. Stays on this device until you export it.
+      </p>
+
       {/* Restart — wipes everything back to a first-time-open state. */}
       <button onClick={() => setResetConfirmOpen(true)}
         className="w-full text-center rounded-3xl p-4 mt-10 text-[13px] font-extrabold active:scale-[0.98] transition-transform"
@@ -3941,13 +4044,32 @@ function App() {
   };
 
   // Remember a manual category fix (keyed by garment type) so the same correction
-  // is auto-applied to that type on every future scan.
+  // is auto-applied to that type on every future scan. Merges into any existing
+  // entry so it doesn't clobber a learned noun (see recordNameCorrection).
   const recordCorrection = (noun, category, subcategory) => {
     const key = (noun || "").toLowerCase().trim();
     if (!key) return;
     setPrefs((p) => {
       const fb = p.feedback || emptyFeedback();
-      return { ...p, feedback: { ...fb, corrections: { ...(fb.corrections || {}), [key]: { category, subcategory: subcategory || null } } } };
+      const prev = (fb.corrections || {})[key] || {};
+      return { ...p, feedback: { ...fb, corrections: { ...(fb.corrections || {}), [key]: { ...prev, category, subcategory: subcategory || null } } } };
+    });
+  };
+
+  // Learn a TYPE fix from a manual RENAME: the detector said "Blouse", the user
+  // typed "Brown Henley Shirt" -> remember that this type is a Henley Shirt and
+  // name it that on every future scan. Keyed by what the detector GUESSED, so it
+  // corrects the same mistake next time. Only fires when the new name actually
+  // contains a garment type we know (parseTypeFromName), so a nickname like
+  // "my lucky shirt" stays on that one item instead of renaming every blouse.
+  const recordNameCorrection = (detectedNoun, newName) => {
+    const key = (detectedNoun || "").toLowerCase().trim();
+    const type = parseTypeFromName(newName);
+    if (!key || !type || type === key) return;
+    setPrefs((p) => {
+      const fb = p.feedback || emptyFeedback();
+      const prev = (fb.corrections || {})[key] || {};
+      return { ...p, feedback: { ...fb, corrections: { ...(fb.corrections || {}), [key]: { ...prev, noun: titleCase(type) } } } };
     });
   };
 
@@ -4114,7 +4236,7 @@ function App() {
   if (!onboarded) {
     return (
       <>
-        <Onboarding onDone={finishOnboarding} onAddItem={addItem} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection}
+        <Onboarding onDone={finishOnboarding} onAddItem={addItem} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection} onLearnName={recordNameCorrection}
           onSignInGoogle={signInGoogle} onSignUpEmail={signUpEmail} onSignInEmail={signInEmail} onForgotPassword={sendPasswordReset} authError={authError} user={user} />
         <Toast msg={toast} />
         <UpdateBanner show={updateAvailable} />
@@ -4132,7 +4254,7 @@ function App() {
           )}
           {/* Camera stays mounted (just hidden) so a taken photo + AI loading aren't lost when you switch tabs. */}
           <div style={{ display: tab === "camera" ? "block" : "none" }}>
-            <CameraTab onAdd={addItem} active={tab === "camera"} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection} />
+            <CameraTab onAdd={addItem} active={tab === "camera"} corrections={prefs.feedback && prefs.feedback.corrections} onCorrect={recordCorrection} onLearnName={recordNameCorrection} />
           </div>
           {tab === "profile" && (
             <ProfileTab aesthetics={prefs.aesthetics} setAesthetics={setAesthetics} favorites={favorites} toggleFav={toggleFav} tryNew={prefs.tryNew} setTryNew={setTryNew} baseStyle={prefs.baseStyle} setBaseStyle={setBaseStyle} feedback={prefs.feedback} styleBoard={prefs.styleBoard} onRate={rateOutfit} plan={prefs.plan} setPlan={setPlan} usage={getUsage(prefs)} onShareBonus={grantShareBonus} onReset={handleReset} showToast={showToast}
