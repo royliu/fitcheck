@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260716164532";
+const APP_VERSION = "20260716165232";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -2234,7 +2234,7 @@ function ClosetItemRow({ item, onTrash, onToggleWash, onToggleFav, onOpen }) {
 
 /* Focused detail window for a single closet piece — big image + editable name,
    color and type (same controls as the post-photo item tag). */
-function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash }) {
+function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash, onLearnName }) {
   if (!item) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "#00000066" }} onClick={onClose}>
@@ -2256,7 +2256,12 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash })
         {/* editable details */}
         <div className="p-5 overflow-y-auto" style={{ minHeight: 0, background: "#F3EFFB" }}>
           <label className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "#A99FB5" }}>Name</label>
+          {/* Learn on BLUR, not per keystroke — onChange fires on every letter,
+              which would try to teach "B", "Br", "Bro"… Only the committed name
+              is a real correction. Needs item.noun (the detected type) as the
+              key, so items saved before that was persisted simply teach nothing. */}
           <input value={item.name} onChange={(e) => onRename(item.id, e.target.value)}
+            onBlur={() => { if (onLearnName && item.noun) onLearnName(item.noun, item.name); }}
             className="w-full mt-1 mb-5 rounded-2xl px-4 py-3 text-[16px] font-extrabold outline-none"
             style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
 
@@ -2311,7 +2316,7 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash })
   );
 }
 
-function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
+function ClosetTab({ closet, setCloset, trash, setTrash, goCamera, onLearnName }) {
   const [activeCat, setActiveCat] = useState(null);
   const [activeSub, setActiveSub] = useState(null);
   const [inTrash, setInTrash] = useState(false);
@@ -2352,7 +2357,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera }) {
   const detailItem = detailId ? closet.find((i) => i.id === detailId) : null;
   const detailModal = (
     <ClosetItemDetail item={detailItem} onClose={() => setDetailId(null)}
-      onRename={renameItem} onColor={setItemColor} onType={setItemType} onTrash={toTrash} />
+      onRename={renameItem} onColor={setItemColor} onType={setItemType} onTrash={toTrash} onLearnName={onLearnName} />
   );
 
   /* search across everything */
@@ -2757,7 +2762,9 @@ function CameraTab({ onAdd, active, corrections, onCorrect, onLearnName, compact
       // Keep the labelled example — the only path to ever genuinely retraining
       // the detector, which can't learn on-device. Fire-and-forget.
       logTrainingCorrection(r);
-      onAdd({ name: r.name, category: r.category, subcategory: r.subcategory || null, color: r.color, photo: r.photo, id: uid(), fav: false, wash: false });
+      // Keep `noun` (the detected garment TYPE) on the saved item — it's the key
+      // a later rename in the Closet detail view needs to teach a type fix.
+      onAdd({ name: r.name, category: r.category, subcategory: r.subcategory || null, color: r.color, noun: r.noun || null, photo: r.photo, id: uid(), fav: false, wash: false });
     });
     setResults(null);
     setPhoto(null);
@@ -4250,7 +4257,7 @@ function App() {
         <div className="px-5 pt-8">
           {tab === "stylist" && <StylistTab closet={closet} favorites={favorites} toggleFav={toggleFav} prefs={prefs} weather={weather} onRate={rateOutfit} onDismiss={dismissOutfit} onUseGeneration={useGeneration} goProfile={() => setTab("profile")} user={user} />}
           {tab === "closet" && (
-            <ClosetTab closet={closet} setCloset={setCloset} trash={trash} setTrash={setTrash} goCamera={() => setTab("camera")} />
+            <ClosetTab closet={closet} setCloset={setCloset} trash={trash} setTrash={setTrash} goCamera={() => setTab("camera")} onLearnName={recordNameCorrection} />
           )}
           {/* Camera stays mounted (just hidden) so a taken photo + AI loading aren't lost when you switch tabs. */}
           <div style={{ display: tab === "camera" ? "block" : "none" }}>
