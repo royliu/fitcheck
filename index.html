@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260716173859";
+const APP_VERSION = "20260718105915";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -2042,17 +2042,48 @@ function MoodBoardDetail({ outfit: o, pastel: p, rating, fav, onClose, onRate, o
    popup. Tap the X to remove a look you don't want. */
 function StylistOutfitCard({ o, pastel: p, rating, fav, onRate, onFav, onDismiss }) {
   const [noteOpen, setNoteOpen] = useState(false);
+  // Swipe-left-to-dismiss (replaces the old X). A committed left swipe flies the
+  // card off and calls onDismiss — same "not my style" signal the X used to send
+  // (see dismissOutfit: downvotes this look's aesthetic + items).
+  const [dragX, setDragX] = useState(null);   // live horizontal offset while dragging
+  const [flung, setFlung] = useState(false);  // animating off-screen before removal
+  const startX = useRef(null), startY = useRef(null), lock = useRef(0); // 0 undecided, 1 horizontal, -1 vertical
+  const DISMISS_AT = 90;                       // px of left-drag needed to dismiss
+  const down = (e) => { if (flung) return; startX.current = e.clientX; startY.current = e.clientY; lock.current = 0; };
+  const mv = (e) => {
+    if (startX.current == null || flung) return;
+    const dx = e.clientX - startX.current, dy = e.clientY - startY.current;
+    if (lock.current === 0) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      // Direction lock: only hijack as a swipe when it's clearly horizontal, so
+      // vertical scrolling through the card list still works untouched.
+      lock.current = Math.abs(dx) > Math.abs(dy) ? 1 : -1;
+      if (lock.current === 1) { try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} }
+    }
+    if (lock.current !== 1) return;
+    setDragX(Math.min(0, dx));                 // leftward only
+  };
+  const up = () => {
+    if (startX.current == null) return;
+    const dx = dragX;
+    startX.current = null;
+    if (lock.current === 1 && dx != null && dx <= -DISMISS_AT) setFlung(true);
+    else setDragX(null);                       // snap back
+    lock.current = 0;
+  };
+  const tx = flung ? -520 : (dragX != null ? dragX : 0);
   return (
-    <div className="rounded-3xl p-4 relative" style={{ background: p.bg }}>
-      <button onClick={() => onDismiss(o)} aria-label="remove this look"
-        className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full flex items-center justify-center active:scale-90 transition-transform"
-        style={{ background: "#ffffffd0" }}>
-        <X size={16} color={p.text} />
-      </button>
+    <div className="rounded-3xl p-4 relative"
+      style={{ background: p.bg, touchAction: "pan-y",
+        transform: `translateX(${tx}px)`,
+        opacity: flung ? 0 : (dragX != null ? Math.max(0.3, 1 - Math.abs(dragX) / 320) : 1),
+        transition: (dragX == null || flung) ? "transform .28s ease, opacity .28s ease" : "none" }}
+      onPointerDown={down} onPointerMove={mv} onPointerUp={up} onPointerCancel={up}
+      onTransitionEnd={() => { if (flung) onDismiss(o); }}>
       <OutfitCollage items={o.items} pastel={p} bg="#fff" />
       <div className="flex items-center justify-between mt-3 gap-2">
         <h3 className="text-[17px] font-black pr-8" style={{ color: p.text }}>{o.title}</h3>
-        <button onClick={() => onFav(o)}
+        <button onClick={() => onFav(o)} onPointerDown={(e) => e.stopPropagation()}
           className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0"
           style={{ background: fav ? p.ring : "#ffffffcc" }}>
           <Heart size={18} color={p.text} fill={fav ? p.text : "none"} />
@@ -2071,7 +2102,7 @@ function StylistOutfitCard({ o, pastel: p, rating, fav, onRate, onFav, onDismiss
             ? (rating >= STYLE_STARS ? "★ Loved — added to your style" : "Thanks — personalizing your looks")
             : "Rate this look to personalize your style"}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5" onPointerDown={(e) => e.stopPropagation()}>
           {[1, 2, 3, 4, 5].map((s) => (
             <button key={s} onClick={() => onRate(o, s)} className="active:scale-90 transition-transform" aria-label={"rate " + s + " stars"}>
               <Star size={28} color={p.text} fill={s <= rating ? p.text : "none"} strokeWidth={2.25} />
@@ -2095,7 +2126,7 @@ function StylistOutfitCard({ o, pastel: p, rating, fav, onRate, onFav, onDismiss
         ))}
       </div>
 
-      <button onClick={() => setNoteOpen((v) => !v)}
+      <button onClick={() => setNoteOpen((v) => !v)} onPointerDown={(e) => e.stopPropagation()}
         className="mt-2 w-full flex items-center justify-between px-4 py-2.5 rounded-2xl text-[13px] font-extrabold"
         style={{ background: "#ffffffaa", color: p.text }}>
         Stylist Note
@@ -2222,8 +2253,9 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
           right in the scroll (no tap needed to see the details). */}
       {outfits.length > 0 && (
         <div className="mt-6 space-y-4">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-baseline gap-2 flex-wrap">
             <h2 className="text-lg font-black" style={{ color: "#5A5167" }}>Your {outfits.length} look{outfits.length !== 1 ? "s" : ""}</h2>
+            <span className="text-[11.5px] font-bold" style={{ color: "#C6BCD2" }}>← swipe a look away if it's not you</span>
           </div>
           {outfits.map((o) => (
             <StylistOutfitCard key={o.id} o={o} pastel={o.pastel} rating={ratings[o.id] || 0} fav={favIds.has(o.id)}
