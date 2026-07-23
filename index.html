@@ -57,7 +57,7 @@ import {
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260718105915";
+const APP_VERSION = "20260723125835";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -930,11 +930,13 @@ async function downscaleDataUrl(dataUrl,max=1000){
 }
 
 /* ================= GENERATIVE PRODUCT SHOTS — EXPERIMENT (Route 3) =================
-   Re-photographs a garment as a clean catalog product shot using Google's Gemini
-   image model. Unlike the detector and CLIP, this is NOT on-device: image models
-   are billions of parameters and cannot run in a browser, so this needs a cloud
-   API key and costs real money (~$0.04 per image). Each item is generated ONCE
-   and the result cached on the item, so it's a one-time cost per garment.
+   Re-photographs a garment as a clean catalog product shot via OpenRouter's
+   unified Image API (so any image model — Gemini/nano-banana, GPT-Image,
+   etc. — can be swapped in by slug). Unlike the detector and CLIP, this is NOT
+   on-device: image models are billions of parameters and cannot run in a
+   browser, so this needs a cloud API key and costs real money (~$0.04 per
+   image). Each item is generated ONCE and cached on the item, so it's a
+   one-time cost per garment.
 
    *** TEST MODE ONLY — NOT SHIPPABLE AS-IS. ***
    The key is pasted by the user, lives only in this browser's localStorage, is
@@ -944,10 +946,15 @@ async function downscaleDataUrl(dataUrl,max=1000){
    viewing source and billed to its owner. Shipping this needs a server-side
    proxy that holds the key. The whole feature stays invisible until a key is
    entered, so nothing changes for anyone who never adds one. */
-const GEMINI_KEY_LS = "fitcheck_gemini_key";
-const GEN_MODEL = "gemini-3.1-flash-image";
-function getGeminiKey(){ try { return localStorage.getItem(GEMINI_KEY_LS) || ""; } catch (e) { return ""; } }
-function setGeminiKey(k){ try { k ? localStorage.setItem(GEMINI_KEY_LS, k) : localStorage.removeItem(GEMINI_KEY_LS); } catch (e) {} }
+const OR_KEY_LS = "fitcheck_or_key";
+const OR_MODEL_LS = "fitcheck_or_model";
+// nano-banana 2 — current, cheap, and strong at PRESERVING the input while
+// editing (exactly what a faithful garment re-shoot needs). Overridable below.
+const OR_DEFAULT_MODEL = "google/gemini-3.1-flash-image";
+function getGenKey(){ try { return localStorage.getItem(OR_KEY_LS) || ""; } catch (e) { return ""; } }
+function setGenKey(k){ try { k ? localStorage.setItem(OR_KEY_LS, k) : localStorage.removeItem(OR_KEY_LS); } catch (e) {} }
+function getGenModel(){ try { return localStorage.getItem(OR_MODEL_LS) || OR_DEFAULT_MODEL; } catch (e) { return OR_DEFAULT_MODEL; } }
+function setGenModel(m){ try { (m && m !== OR_DEFAULT_MODEL) ? localStorage.setItem(OR_MODEL_LS, m) : localStorage.removeItem(OR_MODEL_LS); } catch (e) {} }
 
 /* The instruction leans hard on "reproduce, don't redesign": the whole failure
    mode of a generative re-shoot is a beautiful photo of a garment the user
@@ -962,13 +969,12 @@ const PRODUCT_SHOT_PROMPT =
   "Do not redesign it, do not invent or embellish any details, do not add or remove features, " +
   "and do not change the colour.";
 
-/* Google is mid-migration from the legacy generateContent shape to the newer
-   Interactions API, and the REST response nesting for image output isn't pinned
-   down in the docs (the SDKs surface it as output_image.data). Rather than bet
-   on one path and silently break, walk the response and take the first thing
-   that looks like base64 image bytes — this handles output_image.data,
-   steps[].content[].data and legacy candidates[].content.parts[].inline_data.data
-   alike. */
+/* OpenRouter's Image API returns the image at data[0].b64_json, but different
+   routed models/response shapes surface it under slightly different keys. Rather
+   than bet on one path and silently break, walk the response for the first thing
+   that looks like base64 image bytes (b64_json, data, imageBytes, …). The
+   >2000-char + base64-charset guard keeps it from mistaking a text refusal or a
+   short field for the image. */
 function findImageB64(node, depth){
   if (depth > 8 || node == null) return null;
   if (typeof node === "string")
@@ -985,39 +991,45 @@ function findImageB64(node, depth){
   return null;
 }
 
-/* One garment photo -> one product shot (dataURL). Throws a readable message. */
+/* One garment photo -> one product shot. Returns { url, cost }. Throws readable. */
 async function generateProductShot(photoDataUrl){
-  const key = getGeminiKey();
-  if (!key) throw new Error("Add your Gemini API key in Profile first.");
+  const key = getGenKey();
+  if (!key) throw new Error("Add your OpenRouter API key in Profile first.");
   // The model doesn't need full resolution, and a smaller input is cheaper+faster.
   const small = await downscaleDataUrl(photoDataUrl, 768).catch(() => photoDataUrl);
-  const m = /^data:([^;]+);base64,(.*)$/.exec(small);
-  if (!m) throw new Error("Couldn't read that photo.");
-  const resp = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+  const resp = await fetch("https://openrouter.ai/api/v1/images", {
     method: "POST",
-    headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
+    headers: {
+      "Authorization": "Bearer " + key,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://royliu.github.io/fitcheck/",
+      "X-Title": "FitCheck",
+    },
     body: JSON.stringify({
-      model: GEN_MODEL,
-      input: [
-        { type: "text", text: PRODUCT_SHOT_PROMPT },
-        { type: "image", mime_type: m[1], data: m[2] },
-      ],
+      model: getGenModel(),
+      prompt: PRODUCT_SHOT_PROMPT,
+      input_references: [{ type: "image_url", image_url: { url: small } }],
     }),
   });
   const txt = await resp.text();
   if (!resp.ok) {
     let msg = txt;
     try { msg = (JSON.parse(txt).error || {}).message || txt; } catch (e) {}
-    if (resp.status === 400 && /api.?key/i.test(String(msg))) throw new Error("That API key was rejected.");
-    if (resp.status === 429) throw new Error("Rate limited by Google — wait a moment and retry.");
-    throw new Error("Generation failed: " + String(msg).slice(0, 140));
+    if (resp.status === 401 || /invalid.?api.?key|no auth|unauthor/i.test(String(msg))) throw new Error("That OpenRouter key was rejected.");
+    if (resp.status === 402 || /credit|insufficient|balance/i.test(String(msg))) throw new Error("OpenRouter says this key is out of credits.");
+    if (resp.status === 404) throw new Error("That model slug wasn't found — check it in Profile.");
+    if (resp.status === 429) throw new Error("Rate limited — wait a moment and retry.");
+    throw new Error("Generation failed: " + String(msg).slice(0, 160));
   }
-  let json; try { json = JSON.parse(txt); } catch (e) { throw new Error("Unexpected response from the image model."); }
+  let json; try { json = JSON.parse(txt); } catch (e) { throw new Error("Unexpected response from the image API."); }
   const b64 = findImageB64(json, 0);
   if (!b64) throw new Error("The model didn't return an image (it may have refused this photo).");
-  const url = "data:image/png;base64," + b64.replace(/\s/g, "");
+  const media = (json.data && json.data[0] && json.data[0].media_type) || "image/png";
+  const url = "data:" + media + ";base64," + b64.replace(/\s/g, "");
+  const cost = (json.usage && typeof json.usage.cost === "number") ? json.usage.cost : null;
   // Shrink before storing — these ride along to the cloud with every other item.
-  return await downscaleDataUrl(url, 600).catch(() => url);
+  const stored = await downscaleDataUrl(url, 600).catch(() => url);
+  return { url: stored, cost };
 }
 
 /* ================= REAL OUTFIT ENGINE (from the user's actual closet) ================= */
@@ -2360,15 +2372,16 @@ function ClosetItemRow({ item, onTrash, onToggleWash, onToggleFav, onOpen }) {
 
 /* Focused detail window for a single closet piece — big image + editable name,
    color and type (same controls as the post-photo item tag). */
-function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash, onLearnName, onShot }) {
+function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash, onLearnName, onShot, showToast }) {
   const [genBusy, setGenBusy] = useState(false);
   const [genErr, setGenErr] = useState("");
   if (!item) return null;
   const makeShot = async () => {
     setGenErr(""); setGenBusy(true);
     try {
-      const shot = await generateProductShot(item.photo);
-      if (onShot) onShot(item.id, shot);
+      const { url, cost } = await generateProductShot(item.photo);
+      if (onShot) onShot(item.id, url);
+      if (showToast) showToast(cost != null ? `Product shot ready · $${cost.toFixed(3)}` : "Product shot ready");
     } catch (e) {
       setGenErr((e && e.message) || "Couldn't generate that.");
     } finally { setGenBusy(false); }
@@ -2395,7 +2408,7 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash, o
           {/* Route 3 experiment — only appears once a Gemini key is entered in
               Profile, so it's invisible to everyone else. Manual per-item (not
               automatic) because every press costs real money (~$0.04). */}
-          {getGeminiKey() && item.photo && (
+          {getGenKey() && item.photo && (
             <div className="mb-5">
               <button onClick={makeShot} disabled={genBusy}
                 className="w-full flex items-center justify-center gap-2 rounded-2xl py-3 text-[13px] font-extrabold active:scale-[0.98] transition-transform"
@@ -2476,7 +2489,7 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash, o
   );
 }
 
-function ClosetTab({ closet, setCloset, trash, setTrash, goCamera, onLearnName }) {
+function ClosetTab({ closet, setCloset, trash, setTrash, goCamera, onLearnName, showToast }) {
   const [activeCat, setActiveCat] = useState(null);
   const [activeSub, setActiveSub] = useState(null);
   const [inTrash, setInTrash] = useState(false);
@@ -2520,7 +2533,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera, onLearnName }
   const detailItem = detailId ? closet.find((i) => i.id === detailId) : null;
   const detailModal = (
     <ClosetItemDetail item={detailItem} onClose={() => setDetailId(null)}
-      onRename={renameItem} onColor={setItemColor} onType={setItemType} onTrash={toTrash} onLearnName={onLearnName} onShot={setItemShot} />
+      onRename={renameItem} onColor={setItemColor} onType={setItemType} onTrash={toTrash} onLearnName={onLearnName} onShot={setItemShot} showToast={showToast} />
   );
 
   /* search across everything */
@@ -3472,7 +3485,8 @@ function ProfileTab({ aesthetics, setAesthetics, favorites, toggleFav, tryNew, s
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   // Route 3 experiment. The key never leaves this browser (localStorage only —
   // deliberately NOT in prefs, so it's never synced to the account or committed).
-  const [genKey, setGenKeyState] = useState(getGeminiKey());
+  const [genKey, setGenKeyState] = useState(getGenKey());
+  const [genModel, setGenModelState] = useState(getGenModel());
   // Pull the local correction log out as a JSON file. This is the labelled data
   // (thumbnail + what we guessed + what it really was) needed to retrain the
   // detector offline — the on-device model itself can never learn.
@@ -3945,20 +3959,27 @@ function ProfileTab({ aesthetics, setAesthetics, favorites, toggleFav, tryNew, s
           <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: "#8E78C0", color: "#fff" }}>EXPERIMENT</span>
         </div>
         <p className="text-[11.5px] font-semibold leading-relaxed mb-2.5" style={{ color: "#A99FB5" }}>
-          Paste a Google Gemini API key to unlock “Make product shot” on each closet item — it re-shoots your photo as a clean catalog image. About $0.04 per image, billed to your key. Stored on this device only; never uploaded or synced to your account.
+          Paste an OpenRouter API key to unlock “Make product shot” on each closet item — it re-shoots your photo as a clean catalog image. About $0.04 per image, billed to your key. Stored on this device only; never uploaded or synced to your account.
         </p>
         <input value={genKey} onChange={(e) => setGenKeyState(e.target.value)} type="password"
-          placeholder="Gemini API key" spellCheck={false} autoComplete="off"
+          placeholder="OpenRouter API key (sk-or-…)" spellCheck={false} autoComplete="off"
           className="w-full rounded-2xl px-3.5 py-2.5 text-[13px] font-bold outline-none"
           style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
+        <input value={genModel} onChange={(e) => setGenModelState(e.target.value)}
+          placeholder={OR_DEFAULT_MODEL} spellCheck={false} autoComplete="off"
+          className="w-full mt-2 rounded-2xl px-3.5 py-2.5 text-[12px] font-bold outline-none"
+          style={{ background: "#fff", border: "1.5px solid #EFE3F0", color: "#5A5167" }} />
+        <p className="text-[10.5px] font-semibold mt-1" style={{ color: "#C6BCD2" }}>
+          Model slug. Default is nano-banana 2 (great at keeping the garment faithful). Others: openai/gpt-5-image, google/gemini-3-pro-image.
+        </p>
         <div className="flex gap-2 mt-2">
-          <button onClick={() => { setGeminiKey(genKey.trim()); showToast && showToast(genKey.trim() ? "Key saved on this device" : "Key removed"); }}
+          <button onClick={() => { setGenKey(genKey.trim()); setGenModel(genModel.trim()); showToast && showToast(genKey.trim() ? "Saved on this device" : "Key removed"); }}
             className="flex-1 py-2.5 rounded-2xl text-[12.5px] font-black active:scale-[0.98] transition-transform"
             style={{ background: "#8E78C0", color: "#fff" }}>
-            Save key
+            Save
           </button>
-          {getGeminiKey() && (
-            <button onClick={() => { setGeminiKey(""); setGenKeyState(""); showToast && showToast("Key removed"); }}
+          {getGenKey() && (
+            <button onClick={() => { setGenKey(""); setGenKeyState(""); showToast && showToast("Key removed"); }}
               className="px-4 py-2.5 rounded-2xl text-[12.5px] font-black" style={{ background: "#fff", color: "#8A7FA0" }}>
               Remove
             </button>
@@ -4458,7 +4479,7 @@ function App() {
         <div className="px-5 pt-8">
           {tab === "stylist" && <StylistTab closet={closet} favorites={favorites} toggleFav={toggleFav} prefs={prefs} weather={weather} onRate={rateOutfit} onDismiss={dismissOutfit} onUseGeneration={useGeneration} goProfile={() => setTab("profile")} user={user} />}
           {tab === "closet" && (
-            <ClosetTab closet={closet} setCloset={setCloset} trash={trash} setTrash={setTrash} goCamera={() => setTab("camera")} onLearnName={recordNameCorrection} />
+            <ClosetTab closet={closet} setCloset={setCloset} trash={trash} setTrash={setTrash} goCamera={() => setTab("camera")} onLearnName={recordNameCorrection} showToast={showToast} />
           )}
           {/* Camera stays mounted (just hidden) so a taken photo + AI loading aren't lost when you switch tabs. */}
           <div style={{ display: tab === "camera" ? "block" : "none" }}>
