@@ -59,7 +59,7 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "fireb
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260724142318";
+const APP_VERSION = "20260724144208";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -178,90 +178,96 @@ const COLOR_HEX = Object.fromEntries(COLOR_CHOICES.map(([n, h]) => [n, h]));
 /* Colours that need a border/dark icon to be visible on a light swatch. */
 const LIGHT_COLORS = new Set(["White", "Cream", "Beige", "Light Blue", "Light Pink", "Yellow", "Tan", "Gray"]);
 
+/* ---------- Garment silhouettes (48x48) ----------
+   Simple filled shapes, one per garment type, tinted to the item's colour — so a
+   "White T-Shirt" preset shows a white t-shirt shape, "Light Blue Baggy Jeans"
+   shows light-blue jeans, etc. These are illustrations, not photos: real
+   per-item photos can't be bundled into a single offline HTML file, and this
+   stays tiny + works offline. `lines` are stroke-only detail overlays. */
+const GARMENT_SHAPES = {
+  tee:        { d: "M18 6c0 3 12 3 12 0l7 3 5 8-6 4-3-3v23H15V18l-3 3-6-4 5-8z" },
+  longsleeve: { d: "M18 6c0 3 12 3 12 0l6 3 5 22-6 2-3-13v22H15V20l-3 13-6-2 5-22z" },
+  jacket:     { d: "M18 6c0 3 12 3 12 0l6 3 5 22-6 2-3-13v22H15V20l-3 13-6-2 5-22z", lines: ["M24 8v33"] },
+  pants:      { d: "M14 6h20l-2 36h-7l-1-20-1 20h-7z", lines: ["M24 8v10"] },
+  shorts:     { d: "M14 6h20l-1 20h-7l-2-9-2 9h-7z" },
+  skirt:      { d: "M17 8h14l7 32H10z", lines: ["M22 10l-3 30M27 10l3 30"] },
+  sneaker:    { d: "M6 31l2-8h11l6 5h14c3 0 3 6 0 6H9c-2 0-3-1-3-3z", lines: ["M19 23l1 5"] },
+  boot:       { d: "M15 7h8v23h15c3 0 3 8 0 8H15z" },
+  heel:       { d: "M11 8h4l2 25 22 3v4H16c-4 0-5-6-5-11z" },
+  flat:       { d: "M8 27c0-4 9-4 17-2l13 3c3 1 3 6-1 6H12c-3 0-4-4-4-7z" },
+  bag:        { d: "M12 19h24l-2 23H14z", lines: ["M17 19c0-9 14-9 14 0"] },
+  cap:        { d: "M11 28c0-14 23-14 23 0z", extra: [{ d: "M33 25l13 3-13 3z" }] },
+  beanie:     { d: "M11 28c0-15 26-15 26 0z", extra: [{ d: "M9 28h30v6H9z" }] },
+  beltThick:  { d: "M4 19h34v11H4z", extra: [{ d: "M37 20h8v9h-8z", fill: false }] },
+  beltThin:   { d: "M4 22h36v5H4z", extra: [{ d: "M39 20h7v9h-7z", fill: false }] },
+  sockAnkle:  { d: "M19 21h8v13h13c3 0 3 6 0 6H19z" },
+  sockCrew:   { d: "M19 12h8v22h13c3 0 3 6 0 6H19z" },
+  sockKnee:   { d: "M19 5h8v29h13c3 0 3 6 0 6H19z" },
+  sockThigh:  { d: "M19 2h8v32h13c3 0 3 6 0 6H19z" },
+};
+
 /* ---------- Preset staples (quick-add) ----------
    Common wardrobe pieces users can add WITHOUT photographing anything — the
-   "I'm too lazy to snap 40 items" path. Each staple type expands to specific
-   colour/fit variants; adding one drops a normal (photoless) closet item, so it
-   feeds outfit generation like any other piece. Colours are real COLOR_CHOICES
-   names so the swatch + item.color stay consistent. */
-const PRESET_STAPLES = [
-  { type: "T-Shirt", category: "Tops", noun: "T-Shirt", items: [
-    { name: "White T-Shirt", color: "White" }, { name: "Black T-Shirt", color: "Black" },
-    { name: "Gray T-Shirt", color: "Gray" }, { name: "Cream T-Shirt", color: "Cream" },
-    { name: "Baby Blue T-Shirt", color: "Light Blue" }, { name: "Brown T-Shirt", color: "Brown" } ] },
-  { type: "Tank Top", category: "Tops", noun: "Tank Top", items: [
-    { name: "White Tank Top", color: "White" }, { name: "Black Tank Top", color: "Black" }, { name: "Gray Tank Top", color: "Gray" } ] },
-  { type: "Crop Top", category: "Tops", noun: "Crop Top", items: [
-    { name: "White Crop Top", color: "White" }, { name: "Black Crop Top", color: "Black" }, { name: "Pink Crop Top", color: "Pink" } ] },
-  { type: "Button-Up Shirt", category: "Tops", noun: "Button-Up Shirt", items: [
-    { name: "White Button-Up Shirt", color: "White" }, { name: "Light Blue Button-Up Shirt", color: "Light Blue" },
-    { name: "Black Button-Up Shirt", color: "Black" }, { name: "Striped Button-Up Shirt", color: "Blue" } ] },
-  { type: "Blouse", category: "Tops", noun: "Blouse", items: [
-    { name: "White Blouse", color: "White" }, { name: "Black Blouse", color: "Black" }, { name: "Cream Blouse", color: "Cream" } ] },
-  { type: "Polo Shirt", category: "Tops", noun: "Polo Shirt", items: [
-    { name: "White Polo Shirt", color: "White" }, { name: "Navy Polo Shirt", color: "Navy" }, { name: "Black Polo Shirt", color: "Black" } ] },
-  { type: "Jeans", category: "Bottoms", noun: "Jeans", items: [
-    { name: "Light Blue Baggy Jeans", color: "Light Blue" }, { name: "Blue Baggy Jeans", color: "Blue" },
-    { name: "Black Baggy Jeans", color: "Black" }, { name: "Blue Skinny Jeans", color: "Blue" },
-    { name: "Black Skinny Jeans", color: "Black" }, { name: "Blue Straight Jeans", color: "Blue" },
-    { name: "White Straight Jeans", color: "White" } ] },
-  { type: "Trousers", category: "Bottoms", noun: "Trousers", items: [
-    { name: "Black Trousers", color: "Black" }, { name: "Beige Trousers", color: "Beige" }, { name: "Gray Trousers", color: "Gray" } ] },
-  { type: "Sweatpants", category: "Bottoms", noun: "Sweatpants", items: [
-    { name: "Gray Sweatpants", color: "Gray" }, { name: "Black Sweatpants", color: "Black" }, { name: "Cream Sweatpants", color: "Cream" } ] },
-  { type: "Cargo Pants", category: "Bottoms", noun: "Cargo Pants", items: [
-    { name: "Khaki Cargo Pants", color: "Beige" }, { name: "Black Cargo Pants", color: "Black" }, { name: "Olive Cargo Pants", color: "Olive" } ] },
-  { type: "Shorts", category: "Bottoms", noun: "Shorts", items: [
-    { name: "Denim Shorts", color: "Blue" }, { name: "Black Shorts", color: "Black" }, { name: "Beige Shorts", color: "Beige" } ] },
-  { type: "Skirt", category: "Bottoms", noun: "Skirt", items: [
-    { name: "Black Mini Skirt", color: "Black" }, { name: "Denim Mini Skirt", color: "Blue" },
-    { name: "Pleated Skirt", color: "Gray" }, { name: "Black Midi Skirt", color: "Black" } ] },
-  { type: "Leggings", category: "Bottoms", noun: "Leggings", items: [
-    { name: "Black Leggings", color: "Black" }, { name: "Gray Leggings", color: "Gray" } ] },
-  { type: "Hoodie", category: "Outerwear", noun: "Hoodie", items: [
-    { name: "Gray Hoodie", color: "Gray" }, { name: "Black Hoodie", color: "Black" },
-    { name: "Cream Hoodie", color: "Cream" }, { name: "Green Hoodie", color: "Green" } ] },
-  { type: "Sweater", category: "Outerwear", noun: "Knit Sweater", items: [
-    { name: "Cream Knit Sweater", color: "Cream" }, { name: "Gray Knit Sweater", color: "Gray" },
-    { name: "Brown Knit Sweater", color: "Brown" }, { name: "Black Knit Sweater", color: "Black" } ] },
-  { type: "Cardigan", category: "Outerwear", noun: "Cardigan", items: [
-    { name: "Cream Cardigan", color: "Cream" }, { name: "Gray Cardigan", color: "Gray" }, { name: "Brown Cardigan", color: "Brown" } ] },
-  { type: "Denim Jacket", category: "Outerwear", noun: "Denim Jacket", items: [
-    { name: "Blue Denim Jacket", color: "Blue" }, { name: "Black Denim Jacket", color: "Black" } ] },
-  { type: "Leather Jacket", category: "Outerwear", noun: "Leather Jacket", items: [
-    { name: "Black Leather Jacket", color: "Black" }, { name: "Brown Leather Jacket", color: "Brown" } ] },
-  { type: "Blazer", category: "Outerwear", noun: "Blazer", items: [
-    { name: "Black Blazer", color: "Black" }, { name: "Beige Blazer", color: "Beige" }, { name: "Gray Blazer", color: "Gray" } ] },
-  { type: "Puffer Jacket", category: "Outerwear", noun: "Puffer Jacket", items: [
-    { name: "Black Puffer Jacket", color: "Black" }, { name: "White Puffer Jacket", color: "White" } ] },
-  { type: "Trench Coat", category: "Outerwear", noun: "Trench Coat", items: [
-    { name: "Beige Trench Coat", color: "Beige" }, { name: "Black Trench Coat", color: "Black" } ] },
-  { type: "Sneakers", category: "Shoes", noun: "Sneakers", items: [
-    { name: "White Sneakers", color: "White" }, { name: "Black Sneakers", color: "Black" }, { name: "Gray Sneakers", color: "Gray" } ] },
-  { type: "Boots", category: "Shoes", noun: "Boots", items: [
-    { name: "Black Boots", color: "Black" }, { name: "Brown Boots", color: "Brown" }, { name: "Black Ankle Boots", color: "Black" } ] },
-  { type: "Loafers", category: "Shoes", noun: "Loafers", items: [
-    { name: "Black Loafers", color: "Black" }, { name: "Brown Loafers", color: "Brown" } ] },
-  { type: "Ballet Flats", category: "Shoes", noun: "Ballet Flats", items: [
-    { name: "Black Ballet Flats", color: "Black" }, { name: "Beige Ballet Flats", color: "Beige" } ] },
-  { type: "Sandals", category: "Shoes", noun: "Sandals", items: [
-    { name: "Black Sandals", color: "Black" }, { name: "Tan Sandals", color: "Tan" } ] },
-  { type: "Heels", category: "Shoes", noun: "Heels", items: [
-    { name: "Black Heels", color: "Black" }, { name: "Nude Heels", color: "Beige" } ] },
-  { type: "Tote Bag", category: "Accessories", subcategory: "Bags", noun: "Tote Bag", items: [
-    { name: "Black Tote Bag", color: "Black" }, { name: "Beige Tote Bag", color: "Beige" }, { name: "Canvas Tote Bag", color: "Cream" } ] },
-  { type: "Shoulder Bag", category: "Accessories", subcategory: "Bags", noun: "Shoulder Bag", items: [
-    { name: "Black Shoulder Bag", color: "Black" }, { name: "Brown Shoulder Bag", color: "Brown" } ] },
-  { type: "Crossbody Bag", category: "Accessories", subcategory: "Bags", noun: "Crossbody Bag", items: [
-    { name: "Black Crossbody Bag", color: "Black" }, { name: "Brown Crossbody Bag", color: "Brown" } ] },
-  { type: "Baseball Cap", category: "Accessories", subcategory: "Headwear & Neckwear", noun: "Baseball Cap", items: [
-    { name: "Black Baseball Cap", color: "Black" }, { name: "White Baseball Cap", color: "White" } ] },
-  { type: "Beanie", category: "Accessories", subcategory: "Headwear & Neckwear", noun: "Beanie", items: [
-    { name: "Black Beanie", color: "Black" }, { name: "Gray Beanie", color: "Gray" }, { name: "Cream Beanie", color: "Cream" } ] },
-  { type: "Belt", category: "Accessories", subcategory: "Belts", noun: "Belt", items: [
-    { name: "Black Belt", color: "Black" }, { name: "Brown Belt", color: "Brown" } ] },
-  { type: "Socks", category: "Accessories", subcategory: "Socks", noun: "Socks", items: [
-    { name: "White Socks", color: "White" }, { name: "Black Socks", color: "Black" } ] },
+   "I'm too lazy to snap 40 items" path. Organised Group -> Type -> Variant
+   (browse it like drilling into a closet category). Adding a variant drops a
+   normal (photoless) closet item that feeds outfit generation like any other
+   piece. Groups carry the real closet category/subcategory an added item maps to;
+   colours are real COLOR_CHOICES names so shape tint + item.color stay in sync. */
+const PRESET_TREE = [
+  { group: "Tops", icon: Shirt, category: "Tops", types: [
+    { type: "T-Shirt", shape: "tee", noun: "T-Shirt", variants: [["White T-Shirt","White"],["Black T-Shirt","Black"],["Gray T-Shirt","Gray"],["Cream T-Shirt","Cream"],["Baby Blue T-Shirt","Light Blue"],["Brown T-Shirt","Brown"]] },
+    { type: "Tank Top", shape: "tee", noun: "Tank Top", variants: [["White Tank Top","White"],["Black Tank Top","Black"],["Gray Tank Top","Gray"]] },
+    { type: "Crop Top", shape: "tee", noun: "Crop Top", variants: [["White Crop Top","White"],["Black Crop Top","Black"],["Pink Crop Top","Pink"]] },
+    { type: "Button-Up Shirt", shape: "longsleeve", noun: "Button-Up Shirt", variants: [["White Button-Up Shirt","White"],["Light Blue Button-Up Shirt","Light Blue"],["Black Button-Up Shirt","Black"]] },
+    { type: "Blouse", shape: "tee", noun: "Blouse", variants: [["White Blouse","White"],["Black Blouse","Black"],["Cream Blouse","Cream"]] },
+    { type: "Polo Shirt", shape: "tee", noun: "Polo Shirt", variants: [["White Polo Shirt","White"],["Navy Polo Shirt","Navy"],["Black Polo Shirt","Black"]] },
+  ]},
+  { group: "Bottoms", icon: Layers, category: "Bottoms", types: [
+    { type: "Jeans", shape: "pants", noun: "Jeans", variants: [["Light Blue Baggy Jeans","Light Blue"],["Blue Baggy Jeans","Blue"],["Black Baggy Jeans","Black"],["Blue Skinny Jeans","Blue"],["Black Skinny Jeans","Black"],["Blue Straight Jeans","Blue"],["White Straight Jeans","White"]] },
+    { type: "Trousers", shape: "pants", noun: "Trousers", variants: [["Black Trousers","Black"],["Beige Trousers","Beige"],["Gray Trousers","Gray"]] },
+    { type: "Sweatpants", shape: "pants", noun: "Sweatpants", variants: [["Gray Sweatpants","Gray"],["Black Sweatpants","Black"],["Cream Sweatpants","Cream"]] },
+    { type: "Cargo Pants", shape: "pants", noun: "Cargo Pants", variants: [["Khaki Cargo Pants","Beige"],["Black Cargo Pants","Black"],["Olive Cargo Pants","Olive"]] },
+    { type: "Leggings", shape: "pants", noun: "Leggings", variants: [["Black Leggings","Black"],["Gray Leggings","Gray"]] },
+    { type: "Shorts", shape: "shorts", noun: "Shorts", variants: [["Denim Shorts","Blue"],["Black Shorts","Black"],["Beige Shorts","Beige"]] },
+    { type: "Skirt", shape: "skirt", noun: "Skirt", variants: [["Black Mini Skirt","Black"],["Denim Mini Skirt","Blue"],["Pleated Skirt","Gray"],["Black Midi Skirt","Black"]] },
+  ]},
+  { group: "Outerwear", icon: Shirt, category: "Outerwear", types: [
+    { type: "Hoodie", shape: "longsleeve", noun: "Hoodie", variants: [["Gray Hoodie","Gray"],["Black Hoodie","Black"],["Cream Hoodie","Cream"],["Green Hoodie","Green"]] },
+    { type: "Sweater", shape: "longsleeve", noun: "Knit Sweater", variants: [["Cream Knit Sweater","Cream"],["Gray Knit Sweater","Gray"],["Brown Knit Sweater","Brown"],["Black Knit Sweater","Black"]] },
+    { type: "Cardigan", shape: "longsleeve", noun: "Cardigan", variants: [["Cream Cardigan","Cream"],["Gray Cardigan","Gray"],["Brown Cardigan","Brown"]] },
+    { type: "Denim Jacket", shape: "jacket", noun: "Denim Jacket", variants: [["Blue Denim Jacket","Blue"],["Black Denim Jacket","Black"]] },
+    { type: "Leather Jacket", shape: "jacket", noun: "Leather Jacket", variants: [["Black Leather Jacket","Black"],["Brown Leather Jacket","Brown"]] },
+    { type: "Blazer", shape: "jacket", noun: "Blazer", variants: [["Black Blazer","Black"],["Beige Blazer","Beige"],["Gray Blazer","Gray"]] },
+    { type: "Puffer Jacket", shape: "jacket", noun: "Puffer Jacket", variants: [["Black Puffer Jacket","Black"],["White Puffer Jacket","White"]] },
+    { type: "Trench Coat", shape: "jacket", noun: "Trench Coat", variants: [["Beige Trench Coat","Beige"],["Black Trench Coat","Black"]] },
+  ]},
+  { group: "Shoes", icon: Footprints, category: "Shoes", types: [
+    { type: "Sneakers", shape: "sneaker", noun: "Sneakers", variants: [["White Sneakers","White"],["Black Sneakers","Black"],["Gray Sneakers","Gray"]] },
+    { type: "Boots", shape: "boot", noun: "Boots", variants: [["Black Boots","Black"],["Brown Boots","Brown"],["Black Ankle Boots","Black"]] },
+    { type: "Loafers", shape: "flat", noun: "Loafers", variants: [["Black Loafers","Black"],["Brown Loafers","Brown"]] },
+    { type: "Ballet Flats", shape: "flat", noun: "Ballet Flats", variants: [["Black Ballet Flats","Black"],["Beige Ballet Flats","Beige"]] },
+    { type: "Sandals", shape: "flat", noun: "Sandals", variants: [["Black Sandals","Black"],["Tan Sandals","Tan"]] },
+    { type: "Heels", shape: "heel", noun: "Heels", variants: [["Black Heels","Black"],["Nude Heels","Beige"]] },
+  ]},
+  { group: "Bags", icon: ShoppingBag, category: "Accessories", subcategory: "Bags", types: [
+    { type: "Tote Bag", shape: "bag", noun: "Tote Bag", variants: [["Black Tote Bag","Black"],["Beige Tote Bag","Beige"],["Canvas Tote Bag","Cream"]] },
+    { type: "Shoulder Bag", shape: "bag", noun: "Shoulder Bag", variants: [["Black Shoulder Bag","Black"],["Brown Shoulder Bag","Brown"]] },
+    { type: "Crossbody Bag", shape: "bag", noun: "Crossbody Bag", variants: [["Black Crossbody Bag","Black"],["Brown Crossbody Bag","Brown"]] },
+  ]},
+  { group: "Hats", icon: Crown, category: "Accessories", subcategory: "Headwear & Neckwear", types: [
+    { type: "Baseball Cap", shape: "cap", noun: "Baseball Cap", variants: [["Black Baseball Cap","Black"],["White Baseball Cap","White"]] },
+    { type: "Beanie", shape: "beanie", noun: "Beanie", variants: [["Black Beanie","Black"],["Gray Beanie","Gray"],["Cream Beanie","Cream"]] },
+  ]},
+  { group: "Belts", icon: Layers, category: "Accessories", subcategory: "Belts", types: [
+    { type: "Thick Belt", shape: "beltThick", noun: "Thick Belt", variants: [["Black Thick Belt","Black"],["Brown Thick Belt","Brown"],["Tan Thick Belt","Tan"]] },
+    { type: "Thin Belt", shape: "beltThin", noun: "Thin Belt", variants: [["Black Thin Belt","Black"],["Brown Thin Belt","Brown"],["Tan Thin Belt","Tan"]] },
+  ]},
+  { group: "Socks", icon: Footprints, category: "Accessories", subcategory: "Socks", types: [
+    { type: "Ankle Socks", shape: "sockAnkle", noun: "Ankle Socks", variants: [["White Ankle Socks","White"],["Black Ankle Socks","Black"],["Gray Ankle Socks","Gray"]] },
+    { type: "Crew Socks", shape: "sockCrew", noun: "Crew Socks", variants: [["White Crew Socks","White"],["Black Crew Socks","Black"],["Gray Crew Socks","Gray"]] },
+    { type: "Knee-High Socks", shape: "sockKnee", noun: "Knee-High Socks", variants: [["White Knee-High Socks","White"],["Black Knee-High Socks","Black"]] },
+    { type: "Thigh-High Socks", shape: "sockThigh", noun: "Thigh-High Socks", variants: [["White Thigh-High Socks","White"],["Black Thigh-High Socks","Black"]] },
+  ]},
 ];
 
 const CAT_ICON = {
@@ -2601,60 +2607,102 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash, o
   );
 }
 
-/* A little colour swatch standing in for a photo on preset rows: the garment's
-   colour, with its category icon (dark on light colours, white on dark ones). */
-function PresetSwatch({ color, category, size = 44 }) {
+/* A garment silhouette tinted to the item's colour, sitting on a pale card — the
+   stand-in "photo" for preset rows. Light garments get a subtle outline so a
+   white tee is visible on the light card. */
+function GarmentIcon({ shape, color, size = 46 }) {
+  const s = GARMENT_SHAPES[shape] || GARMENT_SHAPES.tee;
   const hex = COLOR_HEX[color] || "#cccccc";
-  const light = LIGHT_COLORS.has(color);
+  const outline = LIGHT_COLORS.has(color) ? "#0000003a" : "#00000022";
+  const box = Math.round(size * 0.9);
   return (
-    <div className="rounded-2xl flex items-center justify-center shrink-0"
-      style={{ width: size, height: size, background: hex, border: light ? "1.5px solid #0000001a" : "none" }}>
-      <CatIcon category={category} size={Math.round(size * 0.42)} color={light ? "#00000055" : "#ffffffdd"} />
+    <div className="rounded-2xl flex items-center justify-center shrink-0" style={{ width: size, height: size, background: "#F6EEF6" }}>
+      <svg width={box} height={box} viewBox="0 0 48 48" fill="none">
+        <path d={s.d} fill={hex} stroke={outline} strokeWidth="1.6" strokeLinejoin="round" />
+        {(s.extra || []).map((e, i) => (
+          <path key={"e" + i} d={e.d} fill={e.fill === false ? "none" : hex} stroke={outline} strokeWidth="1.6" strokeLinejoin="round" />
+        ))}
+        {(s.lines || []).map((d, i) => (
+          <path key={"l" + i} d={d} fill="none" stroke={outline} strokeWidth="1.4" strokeLinecap="round" />
+        ))}
+      </svg>
     </div>
   );
 }
 
-/* Quick-add list of common staples (used in both onboarding and the closet tab).
-   Two levels: tap a type to expand its colour/fit variants, tap + to add one.
-   onAdd receives a ready-to-store item shape (minus id). addedNames (optional,
-   lowercased Set) shows how many of each are already in the closet. */
+/* Quick-add preset browser (used in both onboarding and the closet tab). Drills
+   down like a closet category: Group -> Type -> Variant, with a Back at each
+   level. Tapping + on a variant adds it. onAdd gets a ready-to-store item shape
+   (minus id); addedNames (optional lowercased Set) shows an "already added" check. */
 function PresetPicker({ onAdd, addedNames }) {
-  const [open, setOpen] = useState(null);
+  const [groupKey, setGroupKey] = useState(null);
+  const [typeKey, setTypeKey] = useState(null);
+  const group = groupKey ? PRESET_TREE.find((g) => g.group === groupKey) : null;
+  const type = group && typeKey ? group.types.find((t) => t.type === typeKey) : null;
+
+  // Level 3 — variants of one type, each with an add button.
+  if (group && type) {
+    return (
+      <div className="space-y-2">
+        <button onClick={() => setTypeKey(null)} className="flex items-center gap-1.5 text-[13px] font-extrabold mb-1" style={{ color: "#A99FB5" }}>
+          <ArrowLeft size={16} /> {group.group}
+        </button>
+        {type.variants.map(([name, color]) => {
+          const have = addedNames ? addedNames.has(name.toLowerCase()) : false;
+          return (
+            <div key={name} className="flex items-center gap-3 p-2.5 rounded-2xl" style={{ background: "#fff", border: "1.5px solid #F1E6F1" }}>
+              <GarmentIcon shape={type.shape} color={color} size={44} />
+              <span className="flex-1 text-[14px] font-extrabold min-w-0 truncate" style={{ color: "#5A5167" }}>{name}</span>
+              {have && <Check size={16} color="#6BA37C" />}
+              <button onClick={() => onAdd({ name, color, category: group.category, subcategory: group.subcategory || null, noun: type.noun })}
+                aria-label={"add " + name}
+                className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0"
+                style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
+                <Plus size={17} color="#7E6AB5" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Level 2 — types within a group.
+  if (group) {
+    return (
+      <div className="space-y-2">
+        <button onClick={() => setGroupKey(null)} className="flex items-center gap-1.5 text-[13px] font-extrabold mb-1" style={{ color: "#A99FB5" }}>
+          <ArrowLeft size={16} /> Categories
+        </button>
+        {group.types.map((t) => (
+          <button key={t.type} onClick={() => setTypeKey(t.type)}
+            className="w-full flex items-center gap-3 p-2.5 rounded-2xl active:opacity-80" style={{ background: "#fff", border: "1.5px solid #F1E6F1" }}>
+            <GarmentIcon shape={t.shape} color={t.variants[0][1]} size={44} />
+            <div className="flex-1 text-left min-w-0">
+              <div className="text-[14.5px] font-extrabold truncate" style={{ color: "#5A5167" }}>{t.type}</div>
+              <div className="text-[12px] font-semibold" style={{ color: "#A99FB5" }}>{plural(t.variants.length, "option")}</div>
+            </div>
+            <ChevronDown size={18} color="#C6BCD2" style={{ transform: "rotate(-90deg)" }} />
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  // Level 1 — the groups (Tops, Bottoms, …), like the closet category grid.
   return (
-    <div className="space-y-2.5">
-      {PRESET_STAPLES.map((s) => {
-        const isOpen = open === s.type;
+    <div className="grid grid-cols-2 gap-2.5">
+      {PRESET_TREE.map((g, i) => {
+        const Icon = g.icon; const p = PASTELS[i % PASTELS.length];
         return (
-          <div key={s.type} className="rounded-2xl overflow-hidden" style={{ background: "#fff", border: "1.5px solid #F1E6F1" }}>
-            <button onClick={() => setOpen(isOpen ? null : s.type)} className="w-full flex items-center gap-3 p-3 active:opacity-80">
-              <PresetSwatch color={s.items[0].color} category={s.category} />
-              <div className="flex-1 text-left min-w-0">
-                <div className="text-[15px] font-extrabold truncate" style={{ color: "#5A5167" }}>{s.type}</div>
-                <div className="text-[12px] font-semibold" style={{ color: "#A99FB5" }}>{plural(s.items.length, "option")}</div>
-              </div>
-              <ChevronDown size={18} color="#C6BCD2" style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
-            </button>
-            {isOpen && (
-              <div className="px-3 pb-3 space-y-2">
-                {s.items.map((it) => {
-                  const have = addedNames ? addedNames.has(it.name.toLowerCase()) : false;
-                  return (
-                    <div key={it.name} className="flex items-center gap-3 p-2 rounded-xl" style={{ background: "#FAF6FB" }}>
-                      <PresetSwatch color={it.color} category={s.category} size={38} />
-                      <span className="flex-1 text-[13.5px] font-extrabold min-w-0 truncate" style={{ color: "#5A5167" }}>{it.name}</span>
-                      {have && <Check size={15} color="#6BA37C" />}
-                      <button onClick={() => onAdd({ name: it.name, color: it.color, category: s.category, subcategory: s.subcategory || null, noun: s.noun })}
-                        aria-label={"add " + it.name}
-                        className="w-8 h-8 rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0"
-                        style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
-                        <Plus size={16} color="#7E6AB5" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          <button key={g.group} onClick={() => { setGroupKey(g.group); setTypeKey(null); }}
+            className="rounded-3xl p-3.5 text-left active:scale-95 transition-transform" style={{ background: p.bg }}>
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center mb-2" style={{ background: "#ffffffcc" }}>
+              <Icon size={20} color={p.text} />
+            </div>
+            <div className="text-[14.5px] font-black" style={{ color: p.text }}>{g.group}</div>
+            <div className="text-[11.5px] font-bold" style={{ color: p.text + "bb" }}>{plural(g.types.length, "type")}</div>
+          </button>
         );
       })}
     </div>
@@ -4671,10 +4719,14 @@ function App() {
   };
 
   const addItem = (item) => {
-    setCloset((c) => [item, ...c]);
-    showToast(`${item.name} added to closet`);
+    // Ensure a unique id: the camera flow pre-assigns one, but quick-add presets
+    // arrive without it — an id-less item collides in the closet (keys, detail,
+    // trash all go by id).
+    const it = item.id ? item : { ...item, id: uid(), fav: item.fav || false, wash: item.wash || false };
+    setCloset((c) => [it, ...c]);
+    showToast(`${it.name} added to closet`);
     setTab("closet");
-    maybeAutoShot(item);
+    maybeAutoShot(it);
   };
   // EXPERIMENT (Route 3): auto-generate the catalog product shot for a freshly
   // added item, in the background, then swap it onto that item. Gated exactly
