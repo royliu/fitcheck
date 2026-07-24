@@ -27,7 +27,8 @@
     "@huggingface/transformers": "https://esm.sh/@huggingface/transformers@3.3.3",
     "firebase/app": "https://esm.sh/firebase@10.14.1/app",
     "firebase/auth": "https://esm.sh/firebase@10.14.1/auth?deps=@firebase/app@0.10.13",
-    "firebase/firestore": "https://esm.sh/firebase@10.14.1/firestore?deps=@firebase/app@0.10.13"
+    "firebase/firestore": "https://esm.sh/firebase@10.14.1/firestore?deps=@firebase/app@0.10.13",
+    "firebase/analytics": "https://esm.sh/firebase@10.14.1/analytics?deps=@firebase/app@0.10.13"
   }
 }
 </script>
@@ -54,10 +55,11 @@ import {
 import {
   getFirestore, doc, setDoc, getDoc, deleteDoc, collection, getDocs, writeBatch, serverTimestamp,
 } from "firebase/firestore";
+import { getAnalytics, isSupported as analyticsSupported, logEvent } from "firebase/analytics";
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260723125835";
+const APP_VERSION = "20260723205125";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -75,6 +77,18 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
+
+/* Google Analytics (GA4). It was configured (measurementId above) but never
+   started — calling getAnalytics() is what actually turns on active-user,
+   session, realtime and new-vs-returning tracking. Guarded by isSupported():
+   analytics is unavailable in some in-app webviews / privacy modes, and a
+   failure here must never break the app. Once live it auto-collects
+   first_visit / session_start / page_view (that alone answers "how many people
+   use FitCheck"); track() below adds a few high-signal custom events. No PII is
+   ever sent — event names and counts only, never emails, photos, or closet data. */
+let _analytics = null;
+analyticsSupported().then((ok) => { if (ok) { try { _analytics = getAnalytics(firebaseApp); } catch (e) {} } }).catch(() => {});
+function track(name, params) { try { if (_analytics) logEvent(_analytics, name, params || {}); } catch (e) {} }
 const googleProvider = new GoogleAuthProvider();
 // Always show Google's account chooser instead of silently reusing whichever
 // account the browser last signed in with — otherwise a user who just did a
@@ -2181,6 +2195,7 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
       // Cost is per OUTFIT produced (usually 5), not per click — a sparse closet
       // that only yields 2 looks only spends 2 generations.
       if (built.length) onUseGeneration && onUseGeneration(built.length);
+      track("generate_outfits", { count: built.length });
       setGenerating(false);
     }, 500);
   };
@@ -2898,6 +2913,7 @@ function CameraTab({ onAdd, active, corrections, onCorrect, onLearnName, compact
       // changed — that diff is both the lesson to learn and the training record.
       setResults(items.map((it) => ({ ...it, _ai: { noun: it.noun || null, category: it.category, subcategory: it.subcategory || null, color: it.color, name: it.name } })));
       if (annotated) setPhoto(annotated); // show the labeled boxes over the photo
+      track("scan_completed", { items: items.length });
       if (!items.length) setError("No items found — make sure the WHOLE item is in the frame and step back a bit. A close-up of just part of an item won't be recognized.");
     } catch (e) {
       // A failed cross-origin module import (common in the standalone web app)
@@ -4209,17 +4225,17 @@ function App() {
   // --- Sign in / up / out ---
   const signInGoogle = async () => {
     setAuthError("");
-    try { await signInWithPopup(auth, googleProvider); }
+    try { await signInWithPopup(auth, googleProvider); track("login", { method: "google" }); }
     catch (e) { setAuthError(e && e.code === "auth/popup-closed-by-user" ? "" : "Couldn't sign in with Google — try again."); }
   };
   const signUpEmail = async (email, password) => {
     setAuthError("");
-    try { await createUserWithEmailAndPassword(auth, email, password); }
+    try { await createUserWithEmailAndPassword(auth, email, password); track("sign_up", { method: "email" }); }
     catch (e) { setAuthError(friendlyAuthError(e)); }
   };
   const signInEmail = async (email, password) => {
     setAuthError("");
-    try { await signInWithEmailAndPassword(auth, email, password); }
+    try { await signInWithEmailAndPassword(auth, email, password); track("login", { method: "email" }); }
     catch (e) { setAuthError(friendlyAuthError(e)); }
   };
   const signOutUser = async () => { try { await signOut(auth); } catch (e) {} };
@@ -4450,6 +4466,7 @@ function App() {
   const finishOnboarding = (data) => {
     setPrefs((p) => ({ ...p, ...data }));
     setOnboarded(true);
+    track("onboarding_complete");
   };
 
   if (!hydrated) {
