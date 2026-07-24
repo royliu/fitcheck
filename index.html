@@ -59,7 +59,7 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "fireb
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260724144208";
+const APP_VERSION = "20260724145125";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -2530,7 +2530,7 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash, o
             <div className="mb-5">
               <button onClick={makeShot} disabled={genBusy}
                 className="w-full flex items-center justify-center gap-2 rounded-2xl py-3 text-[13px] font-extrabold active:scale-[0.98] transition-transform"
-                style={{ background: genBusy ? "#EFE3F0" : "linear-gradient(160deg,#FDE9F1,#F1ECFB)", color: "#7E6AB5" }}>
+                style={{ background: genBusy ? "#F6EEF6" : "#fff", border: "1.5px solid #EFE3F0", color: "#7E6AB5" }}>
                 <Sparkles size={15} />
                 {genBusy ? "Generating…" : item.shot ? "Regenerate product shot" : "Make product shot"}
               </button>
@@ -2689,19 +2689,21 @@ function PresetPicker({ onAdd, addedNames }) {
     );
   }
 
-  // Level 1 — the groups (Tops, Bottoms, …), like the closet category grid.
+  // Level 1 — the groups (Tops, Bottoms, …). Styled white + pink border so it's
+  // clearly distinct from the closet's filled-pastel category tiles.
   return (
     <div className="grid grid-cols-2 gap-2.5">
-      {PRESET_TREE.map((g, i) => {
-        const Icon = g.icon; const p = PASTELS[i % PASTELS.length];
+      {PRESET_TREE.map((g) => {
+        const Icon = g.icon;
         return (
           <button key={g.group} onClick={() => { setGroupKey(g.group); setTypeKey(null); }}
-            className="rounded-3xl p-3.5 text-left active:scale-95 transition-transform" style={{ background: p.bg }}>
-            <div className="w-10 h-10 rounded-2xl flex items-center justify-center mb-2" style={{ background: "#ffffffcc" }}>
-              <Icon size={20} color={p.text} />
+            className="rounded-3xl p-3.5 text-left active:scale-95 transition-transform"
+            style={{ background: "#fff", border: "2px solid #F4B8D3" }}>
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center mb-2" style={{ background: "#FCEFF5" }}>
+              <Icon size={20} color="#C56B96" />
             </div>
-            <div className="text-[14.5px] font-black" style={{ color: p.text }}>{g.group}</div>
-            <div className="text-[11.5px] font-bold" style={{ color: p.text + "bb" }}>{plural(g.types.length, "type")}</div>
+            <div className="text-[14.5px] font-black" style={{ color: "#5A5167" }}>{g.group}</div>
+            <div className="text-[11.5px] font-bold" style={{ color: "#A99FB5" }}>{plural(g.types.length, "type")}</div>
           </button>
         );
       })}
