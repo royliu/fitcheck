@@ -59,7 +59,7 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "fireb
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260724135803";
+const APP_VERSION = "20260724142318";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -172,6 +172,96 @@ const COLOR_CHOICES = [
   ["Mauve","#b896a0"],["Purple","#8a5cc0"],["Navy","#27345a"],["Blue","#3a6bd6"],
   ["Light Blue","#9fc8e6"],["Teal","#2f9c9c"],["Green","#4f9e6a"],["Olive","#7d7f48"],
   ["Dark Green","#2f5d3a"],["Yellow","#e6c14a"],["Orange","#e08a3c"],["Neutral","#bbbbbb"],
+];
+
+const COLOR_HEX = Object.fromEntries(COLOR_CHOICES.map(([n, h]) => [n, h]));
+/* Colours that need a border/dark icon to be visible on a light swatch. */
+const LIGHT_COLORS = new Set(["White", "Cream", "Beige", "Light Blue", "Light Pink", "Yellow", "Tan", "Gray"]);
+
+/* ---------- Preset staples (quick-add) ----------
+   Common wardrobe pieces users can add WITHOUT photographing anything — the
+   "I'm too lazy to snap 40 items" path. Each staple type expands to specific
+   colour/fit variants; adding one drops a normal (photoless) closet item, so it
+   feeds outfit generation like any other piece. Colours are real COLOR_CHOICES
+   names so the swatch + item.color stay consistent. */
+const PRESET_STAPLES = [
+  { type: "T-Shirt", category: "Tops", noun: "T-Shirt", items: [
+    { name: "White T-Shirt", color: "White" }, { name: "Black T-Shirt", color: "Black" },
+    { name: "Gray T-Shirt", color: "Gray" }, { name: "Cream T-Shirt", color: "Cream" },
+    { name: "Baby Blue T-Shirt", color: "Light Blue" }, { name: "Brown T-Shirt", color: "Brown" } ] },
+  { type: "Tank Top", category: "Tops", noun: "Tank Top", items: [
+    { name: "White Tank Top", color: "White" }, { name: "Black Tank Top", color: "Black" }, { name: "Gray Tank Top", color: "Gray" } ] },
+  { type: "Crop Top", category: "Tops", noun: "Crop Top", items: [
+    { name: "White Crop Top", color: "White" }, { name: "Black Crop Top", color: "Black" }, { name: "Pink Crop Top", color: "Pink" } ] },
+  { type: "Button-Up Shirt", category: "Tops", noun: "Button-Up Shirt", items: [
+    { name: "White Button-Up Shirt", color: "White" }, { name: "Light Blue Button-Up Shirt", color: "Light Blue" },
+    { name: "Black Button-Up Shirt", color: "Black" }, { name: "Striped Button-Up Shirt", color: "Blue" } ] },
+  { type: "Blouse", category: "Tops", noun: "Blouse", items: [
+    { name: "White Blouse", color: "White" }, { name: "Black Blouse", color: "Black" }, { name: "Cream Blouse", color: "Cream" } ] },
+  { type: "Polo Shirt", category: "Tops", noun: "Polo Shirt", items: [
+    { name: "White Polo Shirt", color: "White" }, { name: "Navy Polo Shirt", color: "Navy" }, { name: "Black Polo Shirt", color: "Black" } ] },
+  { type: "Jeans", category: "Bottoms", noun: "Jeans", items: [
+    { name: "Light Blue Baggy Jeans", color: "Light Blue" }, { name: "Blue Baggy Jeans", color: "Blue" },
+    { name: "Black Baggy Jeans", color: "Black" }, { name: "Blue Skinny Jeans", color: "Blue" },
+    { name: "Black Skinny Jeans", color: "Black" }, { name: "Blue Straight Jeans", color: "Blue" },
+    { name: "White Straight Jeans", color: "White" } ] },
+  { type: "Trousers", category: "Bottoms", noun: "Trousers", items: [
+    { name: "Black Trousers", color: "Black" }, { name: "Beige Trousers", color: "Beige" }, { name: "Gray Trousers", color: "Gray" } ] },
+  { type: "Sweatpants", category: "Bottoms", noun: "Sweatpants", items: [
+    { name: "Gray Sweatpants", color: "Gray" }, { name: "Black Sweatpants", color: "Black" }, { name: "Cream Sweatpants", color: "Cream" } ] },
+  { type: "Cargo Pants", category: "Bottoms", noun: "Cargo Pants", items: [
+    { name: "Khaki Cargo Pants", color: "Beige" }, { name: "Black Cargo Pants", color: "Black" }, { name: "Olive Cargo Pants", color: "Olive" } ] },
+  { type: "Shorts", category: "Bottoms", noun: "Shorts", items: [
+    { name: "Denim Shorts", color: "Blue" }, { name: "Black Shorts", color: "Black" }, { name: "Beige Shorts", color: "Beige" } ] },
+  { type: "Skirt", category: "Bottoms", noun: "Skirt", items: [
+    { name: "Black Mini Skirt", color: "Black" }, { name: "Denim Mini Skirt", color: "Blue" },
+    { name: "Pleated Skirt", color: "Gray" }, { name: "Black Midi Skirt", color: "Black" } ] },
+  { type: "Leggings", category: "Bottoms", noun: "Leggings", items: [
+    { name: "Black Leggings", color: "Black" }, { name: "Gray Leggings", color: "Gray" } ] },
+  { type: "Hoodie", category: "Outerwear", noun: "Hoodie", items: [
+    { name: "Gray Hoodie", color: "Gray" }, { name: "Black Hoodie", color: "Black" },
+    { name: "Cream Hoodie", color: "Cream" }, { name: "Green Hoodie", color: "Green" } ] },
+  { type: "Sweater", category: "Outerwear", noun: "Knit Sweater", items: [
+    { name: "Cream Knit Sweater", color: "Cream" }, { name: "Gray Knit Sweater", color: "Gray" },
+    { name: "Brown Knit Sweater", color: "Brown" }, { name: "Black Knit Sweater", color: "Black" } ] },
+  { type: "Cardigan", category: "Outerwear", noun: "Cardigan", items: [
+    { name: "Cream Cardigan", color: "Cream" }, { name: "Gray Cardigan", color: "Gray" }, { name: "Brown Cardigan", color: "Brown" } ] },
+  { type: "Denim Jacket", category: "Outerwear", noun: "Denim Jacket", items: [
+    { name: "Blue Denim Jacket", color: "Blue" }, { name: "Black Denim Jacket", color: "Black" } ] },
+  { type: "Leather Jacket", category: "Outerwear", noun: "Leather Jacket", items: [
+    { name: "Black Leather Jacket", color: "Black" }, { name: "Brown Leather Jacket", color: "Brown" } ] },
+  { type: "Blazer", category: "Outerwear", noun: "Blazer", items: [
+    { name: "Black Blazer", color: "Black" }, { name: "Beige Blazer", color: "Beige" }, { name: "Gray Blazer", color: "Gray" } ] },
+  { type: "Puffer Jacket", category: "Outerwear", noun: "Puffer Jacket", items: [
+    { name: "Black Puffer Jacket", color: "Black" }, { name: "White Puffer Jacket", color: "White" } ] },
+  { type: "Trench Coat", category: "Outerwear", noun: "Trench Coat", items: [
+    { name: "Beige Trench Coat", color: "Beige" }, { name: "Black Trench Coat", color: "Black" } ] },
+  { type: "Sneakers", category: "Shoes", noun: "Sneakers", items: [
+    { name: "White Sneakers", color: "White" }, { name: "Black Sneakers", color: "Black" }, { name: "Gray Sneakers", color: "Gray" } ] },
+  { type: "Boots", category: "Shoes", noun: "Boots", items: [
+    { name: "Black Boots", color: "Black" }, { name: "Brown Boots", color: "Brown" }, { name: "Black Ankle Boots", color: "Black" } ] },
+  { type: "Loafers", category: "Shoes", noun: "Loafers", items: [
+    { name: "Black Loafers", color: "Black" }, { name: "Brown Loafers", color: "Brown" } ] },
+  { type: "Ballet Flats", category: "Shoes", noun: "Ballet Flats", items: [
+    { name: "Black Ballet Flats", color: "Black" }, { name: "Beige Ballet Flats", color: "Beige" } ] },
+  { type: "Sandals", category: "Shoes", noun: "Sandals", items: [
+    { name: "Black Sandals", color: "Black" }, { name: "Tan Sandals", color: "Tan" } ] },
+  { type: "Heels", category: "Shoes", noun: "Heels", items: [
+    { name: "Black Heels", color: "Black" }, { name: "Nude Heels", color: "Beige" } ] },
+  { type: "Tote Bag", category: "Accessories", subcategory: "Bags", noun: "Tote Bag", items: [
+    { name: "Black Tote Bag", color: "Black" }, { name: "Beige Tote Bag", color: "Beige" }, { name: "Canvas Tote Bag", color: "Cream" } ] },
+  { type: "Shoulder Bag", category: "Accessories", subcategory: "Bags", noun: "Shoulder Bag", items: [
+    { name: "Black Shoulder Bag", color: "Black" }, { name: "Brown Shoulder Bag", color: "Brown" } ] },
+  { type: "Crossbody Bag", category: "Accessories", subcategory: "Bags", noun: "Crossbody Bag", items: [
+    { name: "Black Crossbody Bag", color: "Black" }, { name: "Brown Crossbody Bag", color: "Brown" } ] },
+  { type: "Baseball Cap", category: "Accessories", subcategory: "Headwear & Neckwear", noun: "Baseball Cap", items: [
+    { name: "Black Baseball Cap", color: "Black" }, { name: "White Baseball Cap", color: "White" } ] },
+  { type: "Beanie", category: "Accessories", subcategory: "Headwear & Neckwear", noun: "Beanie", items: [
+    { name: "Black Beanie", color: "Black" }, { name: "Gray Beanie", color: "Gray" }, { name: "Cream Beanie", color: "Cream" } ] },
+  { type: "Belt", category: "Accessories", subcategory: "Belts", noun: "Belt", items: [
+    { name: "Black Belt", color: "Black" }, { name: "Brown Belt", color: "Brown" } ] },
+  { type: "Socks", category: "Accessories", subcategory: "Socks", noun: "Socks", items: [
+    { name: "White Socks", color: "White" }, { name: "Black Socks", color: "Black" } ] },
 ];
 
 const CAT_ICON = {
@@ -2511,6 +2601,66 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash, o
   );
 }
 
+/* A little colour swatch standing in for a photo on preset rows: the garment's
+   colour, with its category icon (dark on light colours, white on dark ones). */
+function PresetSwatch({ color, category, size = 44 }) {
+  const hex = COLOR_HEX[color] || "#cccccc";
+  const light = LIGHT_COLORS.has(color);
+  return (
+    <div className="rounded-2xl flex items-center justify-center shrink-0"
+      style={{ width: size, height: size, background: hex, border: light ? "1.5px solid #0000001a" : "none" }}>
+      <CatIcon category={category} size={Math.round(size * 0.42)} color={light ? "#00000055" : "#ffffffdd"} />
+    </div>
+  );
+}
+
+/* Quick-add list of common staples (used in both onboarding and the closet tab).
+   Two levels: tap a type to expand its colour/fit variants, tap + to add one.
+   onAdd receives a ready-to-store item shape (minus id). addedNames (optional,
+   lowercased Set) shows how many of each are already in the closet. */
+function PresetPicker({ onAdd, addedNames }) {
+  const [open, setOpen] = useState(null);
+  return (
+    <div className="space-y-2.5">
+      {PRESET_STAPLES.map((s) => {
+        const isOpen = open === s.type;
+        return (
+          <div key={s.type} className="rounded-2xl overflow-hidden" style={{ background: "#fff", border: "1.5px solid #F1E6F1" }}>
+            <button onClick={() => setOpen(isOpen ? null : s.type)} className="w-full flex items-center gap-3 p-3 active:opacity-80">
+              <PresetSwatch color={s.items[0].color} category={s.category} />
+              <div className="flex-1 text-left min-w-0">
+                <div className="text-[15px] font-extrabold truncate" style={{ color: "#5A5167" }}>{s.type}</div>
+                <div className="text-[12px] font-semibold" style={{ color: "#A99FB5" }}>{plural(s.items.length, "option")}</div>
+              </div>
+              <ChevronDown size={18} color="#C6BCD2" style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+            </button>
+            {isOpen && (
+              <div className="px-3 pb-3 space-y-2">
+                {s.items.map((it) => {
+                  const have = addedNames ? addedNames.has(it.name.toLowerCase()) : false;
+                  return (
+                    <div key={it.name} className="flex items-center gap-3 p-2 rounded-xl" style={{ background: "#FAF6FB" }}>
+                      <PresetSwatch color={it.color} category={s.category} size={38} />
+                      <span className="flex-1 text-[13.5px] font-extrabold min-w-0 truncate" style={{ color: "#5A5167" }}>{it.name}</span>
+                      {have && <Check size={15} color="#6BA37C" />}
+                      <button onClick={() => onAdd({ name: it.name, color: it.color, category: s.category, subcategory: s.subcategory || null, noun: s.noun })}
+                        aria-label={"add " + it.name}
+                        className="w-8 h-8 rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0"
+                        style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
+                        <Plus size={16} color="#7E6AB5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ClosetTab({ closet, setCloset, trash, setTrash, goCamera, onLearnName, showToast }) {
   const [activeCat, setActiveCat] = useState(null);
   const [activeSub, setActiveSub] = useState(null);
@@ -2552,6 +2702,13 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera, onLearnName, 
   const setItemShot = (id, shot) => setCloset((c) => c.map((i) => i.id === id ? { ...i, shot: shot || null } : i));
   const setItemType = (id, category, subcategory) => setCloset((c) => c.map((i) => i.id === id
     ? { ...i, category, subcategory: category === "Accessories" ? (subcategory || i.subcategory || "Jewelry") : null } : i));
+  // Quick-add a preset staple (no photo). Feeds outfit generation like any item.
+  const [presetsOpen, setPresetsOpen] = useState(false);
+  const addedNames = new Set(closet.map((i) => (i.name || "").toLowerCase()));
+  const addPreset = (it) => {
+    setCloset((c) => [{ id: uid(), name: it.name, category: it.category, subcategory: it.subcategory || null, color: it.color, noun: it.noun || null, photo: null, fav: false, wash: false }, ...c]);
+    showToast && showToast(`${it.name} added`);
+  };
   const detailItem = detailId ? closet.find((i) => i.id === detailId) : null;
   const detailModal = (
     <ClosetItemDetail item={detailItem} onClose={() => setDetailId(null)}
@@ -2750,6 +2907,29 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera, onLearnName, 
             <div className="text-[15px] font-black" style={{ color: "#8A7FA0" }}>Trash</div>
             <div className="text-[12px] font-bold" style={{ color: "#A99FB5" }}>{plural(trash.length, "item")}</div>
           </button>
+        </div>
+      )}
+
+      {/* Quick-add staples — build a closet fast without photographing anything. */}
+      {!searching && (
+        <div className="mt-6">
+          <button onClick={() => setPresetsOpen((v) => !v)}
+            className="w-full flex items-center gap-2.5 rounded-3xl p-4 active:scale-[0.99] transition-transform"
+            style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: "#ffffffcc" }}>
+              <Plus size={20} color="#7E6AB5" />
+            </div>
+            <div className="flex-1 text-left">
+              <div className="text-[15px] font-black" style={{ color: "#7E6AB5" }}>Quick add staples</div>
+              <div className="text-[12px] font-bold" style={{ color: "#A99FB5" }}>Add common pieces — no photo needed</div>
+            </div>
+            <ChevronDown size={20} color="#B9A8D8" style={{ transform: presetsOpen ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+          </button>
+          {presetsOpen && (
+            <div className="mt-3">
+              <PresetPicker onAdd={addPreset} addedNames={addedNames} />
+            </div>
+          )}
         </div>
       )}
       {detailModal}
@@ -3257,20 +3437,20 @@ function Onboarding({ onDone, onAddItem, corrections, onCorrect, onLearnName, on
   const [picked, setPicked] = useState([]);
   const [collected, setCollected] = useState(null); // { aesthetics, baseStyle } once the closet step finishes
   const [addedCount, setAddedCount] = useState(0);  // pieces added to the real closet during the closet step
+  const [addedNames, setAddedNames] = useState(() => new Set()); // for the preset "already added" check
+  const [closetMode, setClosetMode] = useState("quick"); // "quick" (presets) | "photo" (camera)
 
   const toggle = (a) =>
     setPicked((p) => (p.includes(a) ? p.filter((x) => x !== a) : [...p, a]));
-  const handleAddItem = (item) => { onAddItem(item); setAddedCount((n) => n + 1); };
-
-  // Once something's actually been added to the closet, move on automatically —
-  // no need for "Skip for now" anymore since there's nothing left to skip. The
-  // short delay lets the "added to your closet" confirmation actually be seen.
-  useEffect(() => {
-    if (addedCount === 0) return;
-    const t = setTimeout(() => { setCollected({ aesthetics: picked, baseStyle: base }); setStep("account"); }, 900);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addedCount]);
+  const handleAddItem = (item) => {
+    onAddItem(item);
+    setAddedCount((n) => n + 1);
+    if (item && item.name) setAddedNames((s) => new Set(s).add(item.name.toLowerCase()));
+  };
+  // NOTE: no auto-advance to the account step after the first add — the quick-add
+  // flow is built for adding SEVERAL pieces at once, so we let the user tap the
+  // "Next" link (shown once anything's added) when they're done instead of
+  // whisking them away after one.
 
   return (
     <div style={{ fontFamily: "'Nunito', sans-serif", background: "linear-gradient(180deg,#FDF1F6,#F1F4FC)", minHeight: "100vh" }}>
@@ -3365,11 +3545,38 @@ function Onboarding({ onDone, onAddItem, corrections, onCorrect, onLearnName, on
               </div>
             </div>
             <div className="px-6">
-              <CameraTab active compact onAdd={handleAddItem} corrections={corrections} onCorrect={onCorrect} onLearnName={onLearnName} />
+              <h1 className="text-[30px] leading-tight font-black mb-1" style={{ color: "#5A5167" }}>Build your closet</h1>
+              <p className="text-[13.5px] font-semibold mb-3.5" style={{ color: "#A99FB5" }}>
+                Add a few staples in seconds — no photos needed. Or snap your own pieces.
+              </p>
+              {/* Quick-add (presets) vs. Take a photo. Presets lead — it's the fast,
+                  no-effort path for the "I don't want to photograph everything" user. */}
+              <div className="flex gap-2 p-1 rounded-2xl mb-4" style={{ background: "#F1ECF6" }}>
+                {[["quick", "⚡ Quick add"], ["photo", "📷 Take a photo"]].map(([m, label]) => (
+                  <button key={m} onClick={() => setClosetMode(m)}
+                    className="flex-1 py-2.5 rounded-xl text-[13px] font-black transition-colors"
+                    style={{ background: closetMode === m ? "#fff" : "transparent", color: closetMode === m ? "#7E6AB5" : "#A99FB5", boxShadow: closetMode === m ? "0 2px 8px -3px #00000022" : "none" }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="px-6 pb-10 mt-0.5">
+            {closetMode === "quick" ? (
+              <div className="px-6">
+                <PresetPicker onAdd={handleAddItem} addedNames={addedNames} />
+              </div>
+            ) : (
+              <div className="px-6">
+                <CameraTab active compact onAdd={handleAddItem} corrections={corrections} onCorrect={onCorrect} onLearnName={onLearnName} />
+              </div>
+            )}
+            <div className="px-6 pt-4 pb-10">
               {addedCount > 0 ? (
-                <p className="text-[12.5px] font-bold text-center" style={{ color: "#6BA37C" }}>{plural(addedCount, "piece")} added to your closet ✓</p>
+                <button onClick={() => { setCollected({ aesthetics: picked, baseStyle: base }); setStep("account"); }}
+                  className="w-full py-4 rounded-full text-white font-black text-[16px] flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                  style={{ background: "linear-gradient(135deg,#FBB8D2,#D6B5F0)", boxShadow: "0 12px 30px -6px #F3B6D0aa" }}>
+                  {plural(addedCount, "piece")} added · Continue <ArrowRight size={20} />
+                </button>
               ) : (
                 <button onClick={() => { setCollected({ aesthetics: picked, baseStyle: base }); setStep("account"); }} className="w-full text-[13px] font-bold text-center" style={{ color: "#A99FB5" }}>
                   Skip for now
