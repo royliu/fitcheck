@@ -59,7 +59,7 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "fireb
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260724145125";
+const APP_VERSION = "20260724150703";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -2698,7 +2698,7 @@ function PresetPicker({ onAdd, addedNames }) {
         return (
           <button key={g.group} onClick={() => { setGroupKey(g.group); setTypeKey(null); }}
             className="rounded-3xl p-3.5 text-left active:scale-95 transition-transform"
-            style={{ background: "#fff", border: "2px solid #F4B8D3" }}>
+            style={{ background: "#fff", border: "1.5px solid #F6C4DA" }}>
             <div className="w-10 h-10 rounded-2xl flex items-center justify-center mb-2" style={{ background: "#FCEFF5" }}>
               <Icon size={20} color="#C56B96" />
             </div>
@@ -3602,11 +3602,11 @@ function Onboarding({ onDone, onAddItem, corrections, onCorrect, onLearnName, on
               {/* Quick-add (presets) vs. Take a photo. Presets lead — it's the fast,
                   no-effort path for the "I don't want to photograph everything" user. */}
               <div className="flex gap-2 p-1 rounded-2xl mb-4" style={{ background: "#F1ECF6" }}>
-                {[["quick", "⚡ Quick add"], ["photo", "📷 Take a photo"]].map(([m, label]) => (
+                {[["quick", "Quick add", Zap], ["photo", "Take a photo", CameraIcon]].map(([m, label, Icon]) => (
                   <button key={m} onClick={() => setClosetMode(m)}
-                    className="flex-1 py-2.5 rounded-xl text-[13px] font-black transition-colors"
+                    className="flex-1 py-2.5 rounded-xl text-[13px] font-black transition-colors flex items-center justify-center gap-1.5"
                     style={{ background: closetMode === m ? "#fff" : "transparent", color: closetMode === m ? "#7E6AB5" : "#A99FB5", boxShadow: closetMode === m ? "0 2px 8px -3px #00000022" : "none" }}>
-                    {label}
+                    <Icon size={15} /> {label}
                   </button>
                 ))}
               </div>
@@ -4378,6 +4378,11 @@ function App() {
   // Which item ids existed in each cloud sub-collection as of the last sync —
   // lets syncCloudCollection() know what got deleted locally since then.
   const cloudIdsRef = useRef({ closet: new Set(), trash: new Set(), favorites: new Set(), styleBoard: new Set() });
+  // The account this DEVICE has already synced (persisted). Lets us tell a first
+  // sign-in on this device (union guest data with the cloud) apart from a plain
+  // reload of an already-synced session (local is the freshest copy — cloud must
+  // NOT clobber it, or newly-generated shots revert and deleted items come back).
+  const syncedUidRef = useRef(null);
 
   // Load saved state from IndexedDB once (falling back to a one-time migration of
   // the old localStorage build), then start persisting changes.
@@ -4390,6 +4395,7 @@ function App() {
       }
       if (saved) {
         setOnboarded(!!saved.onboarded);
+        if (saved.syncedUid) syncedUidRef.current = saved.syncedUid;
         if (saved.prefs) setPrefs({ ...defaultPrefs(), ...saved.prefs });
         // One-time repair: closets saved before the uid() fix could contain two
         // items sharing the same id (a per-session counter restarting at 0 every
@@ -4431,30 +4437,29 @@ function App() {
       try {
         const cloud = await pullCloudState(user.uid);
         if (cancelled) return;
-        if (cloud.exists) {
+        // Has this device already synced THIS account before? If so, this is just
+        // a reload — local (IndexedDB) is the freshest copy and must win; pulling
+        // the cloud over it is exactly what reverted generated shots and undid
+        // deletions. We only merge cloud INTO local on the FIRST sign-in of this
+        // account on this device (to fold in guest data).
+        const firstSyncOnDevice = syncedUidRef.current !== user.uid;
+        if (cloud.exists && firstSyncOnDevice) {
           setOnboarded(true);
           // Preferences come from the account (its baseStyle Cali/Korean, plan,
           // ratings, etc. are the source of truth) — EXCEPT aesthetics, which we
-          // UNION with whatever the guest just picked. So an account set to
-          // "streetwear" + a guest who picked "minimalist" ends up with both,
-          // not one clobbering the other. (Deduped; the debounced push below
-          // then saves the combined set back to the account.)
+          // UNION with whatever the guest just picked, so neither clobbers the other.
           const mergedAesthetics = Array.from(new Set([...(cloud.prefs.aesthetics || []), ...(prefs.aesthetics || [])]));
           setPrefs({ ...defaultPrefs(), ...cloud.prefs, aesthetics: mergedAesthetics });
-          // MERGE, don't overwrite. Anything added while signed out — most
-          // importantly the photo(s) taken during onboarding before logging in —
-          // lives in the local (guest) collections right now. If we just replaced
-          // them with the cloud copy, those guest items would silently vanish the
-          // instant an existing account's data loaded (exactly the reported bug).
-          // So union by id: the account's cloud items are the base, and any local
-          // item whose id isn't already up there is a guest addition we keep. The
-          // debounced push effect below then uploads those extras to the account
-          // (cloudIdsRef is seeded with the ORIGINAL cloud ids, so the sync sees
-          // the extras as new and adds them — while deleting nothing).
+          // Union by id, LOCAL wins for shared items: keep every local item as-is
+          // (so a generated shot / edit is never lost), then fold in any cloud item
+          // this device doesn't already have (the account's own pieces, or another
+          // device's). Local-wins matters for existing users whose first post-fix
+          // reload lands here without a syncedUid marker — their fresh local data
+          // survives instead of being overwritten by a stale cloud copy.
           const mergeById = (cloudArr, localArr) => {
-            const have = new Set((cloudArr || []).map((i) => i.id));
-            const extras = (localArr || []).filter((i) => i && i.id && !have.has(i.id));
-            return [...extras, ...(cloudArr || [])];
+            const haveLocal = new Set((localArr || []).filter((i) => i && i.id).map((i) => i.id));
+            const cloudExtras = (cloudArr || []).filter((i) => i && i.id && !haveLocal.has(i.id));
+            return [...(localArr || []).filter((i) => i && i.id), ...cloudExtras];
           };
           setCloset(mergeById(cloud.closet, closet));
           setTrash(mergeById(cloud.trash, trash));
@@ -4465,6 +4470,19 @@ function App() {
             favorites: new Set(cloud.favorites.map((i) => i.id)),
             styleBoard: new Set((cloud.prefs.styleBoard || []).map((i) => i.id)),
           };
+        } else if (cloud.exists) {
+          // Reload of an already-synced session — KEEP local state untouched. Seed
+          // cloudIdsRef with the cloud's CURRENT ids so the debounced push
+          // reconciles the cloud to match local: local upserts (shots/edits) go up,
+          // and anything deleted locally (now absent from local, still in these ids)
+          // gets deleted from the cloud. Local wins, cloud follows.
+          setOnboarded(true);
+          cloudIdsRef.current = {
+            closet: new Set((cloud.closet || []).map((i) => i.id)),
+            trash: new Set((cloud.trash || []).map((i) => i.id)),
+            favorites: new Set((cloud.favorites || []).map((i) => i.id)),
+            styleBoard: new Set((cloud.prefs && cloud.prefs.styleBoard || []).map((i) => i.id)),
+          };
         } else {
           // Brand-new account — upload whatever's on this device right now.
           await pushCloudMain(user.uid, prefs, onboarded);
@@ -4472,6 +4490,7 @@ function App() {
             syncCloudCollection(user.uid, name, name === "styleBoard" ? prefs.styleBoard : { closet, trash, favorites }[name], new Set())));
           cloudIdsRef.current = Object.fromEntries(CLOUD_SUBCOLLECTIONS.map((name, i) => [name, results[i]]));
         }
+        syncedUidRef.current = user.uid;
         if (!cancelled) setCloudReady(true);
       } catch (e) {
         if (!cancelled) { setAuthError("Couldn't reach your account data — you're still safe on this device."); setCloudReady(true); }
@@ -4528,7 +4547,7 @@ function App() {
   // we never overwrite saved data with the starting defaults).
   useEffect(() => {
     if (!hydrated) return;
-    const t = setTimeout(() => { idbSet(STATE_KEY, { onboarded, prefs, closet, trash, favorites }); }, 300);
+    const t = setTimeout(() => { idbSet(STATE_KEY, { onboarded, prefs, closet, trash, favorites, syncedUid: syncedUidRef.current }); }, 300);
     return () => clearTimeout(t);
   }, [hydrated, onboarded, prefs, closet, trash, favorites]);
 
