@@ -59,7 +59,7 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "fireb
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260723205125";
+const APP_VERSION = "20260724134307";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -2432,7 +2432,7 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash, o
                 {genBusy ? "Generating…" : item.shot ? "Regenerate product shot" : "Make product shot"}
               </button>
               <p className="text-[10.5px] font-semibold mt-1.5 text-center" style={{ color: "#C6BCD2" }}>
-                Experiment · ~$0.04 each · generated once, then saved
+                Experiment · ~$0.07 each · generated once, then saved
               </p>
               {genErr && <p className="text-[11.5px] font-bold mt-1.5 text-center" style={{ color: "#D96A6A" }}>{genErr}</p>}
               {item.shot && (
@@ -3975,7 +3975,7 @@ function ProfileTab({ aesthetics, setAesthetics, favorites, toggleFav, tryNew, s
           <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: "#8E78C0", color: "#fff" }}>EXPERIMENT</span>
         </div>
         <p className="text-[11.5px] font-semibold leading-relaxed mb-2.5" style={{ color: "#A99FB5" }}>
-          Paste an OpenRouter API key to unlock “Make product shot” on each closet item — it re-shoots your photo as a clean catalog image. About $0.04 per image, billed to your key. Stored on this device only; never uploaded or synced to your account.
+          Paste an OpenRouter API key to unlock “Make product shot” on each closet item — it re-shoots your photo as a clean catalog image. Roughly $0.07 per image (varies by model), billed to your key. Stored on this device only; never uploaded or synced to your account.
         </p>
         <input value={genKey} onChange={(e) => setGenKeyState(e.target.value)} type="password"
           placeholder="OpenRouter API key (sk-or-…)" spellCheck={false} autoComplete="off"
