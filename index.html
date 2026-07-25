@@ -59,7 +59,7 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "fireb
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260724150703";
+const APP_VERSION = "20260725114128";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -1076,15 +1076,29 @@ function setGenAuto(on){ try { on ? localStorage.removeItem(OR_AUTO_LS) : localS
 /* The instruction leans hard on "reproduce, don't redesign": the whole failure
    mode of a generative re-shoot is a beautiful photo of a garment the user
    doesn't actually own. */
-const PRODUCT_SHOT_PROMPT =
-  "Re-photograph the single main clothing item in this photo as a clean e-commerce product shot. " +
-  "Show ONLY that garment: completely remove the person, any hands, hangers, and the background. " +
-  "Present it laid flat and symmetrical, facing straight on, smoothed out and wrinkle-free, " +
-  "centred and filling the frame, on a plain pure white background with soft even studio lighting " +
-  "and no harsh shadows. Reproduce the garment EXACTLY as it appears: identical colour, pattern, " +
-  "texture, graphics, logos and text, identical cut, sleeve length, collar and proportions. " +
-  "Do not redesign it, do not invent or embellish any details, do not add or remove features, " +
-  "and do not change the colour.";
+/* Build the re-shoot prompt for a SPECIFIC item. Passing the user's chosen
+   colour + garment type is what stops the model grabbing the wrong layer — e.g.
+   producing the light-pink t-shirt worn UNDER the navy jacket the user actually
+   asked for. The description anchors it to the right garment. */
+function productShotPrompt(item){
+  item = item || {};
+  const type = (item.noun || item.name || "clothing item").toString().trim();
+  const color = (item.color && item.color !== "Neutral") ? item.color : "";
+  const desc = (color ? color + " " : "") + type;                 // e.g. "Navy Jacket"
+  return (
+    "Re-photograph ONE specific garment from this photo as a clean e-commerce product shot: " +
+    "the " + desc + ". " +
+    "The photo may show a full outfit or several layers — isolate ONLY the " + desc +
+    " and completely ignore every other garment, the person, hands, hangers and background. " +
+    (color ? ("The garment is " + color + "; keep that exact colour. ") : "") +
+    "Present it laid flat and symmetrical, facing straight on, smoothed out and wrinkle-free, " +
+    "centred and filling the frame, on a plain pure white background with soft even studio " +
+    "lighting and no harsh shadows. Reproduce it EXACTLY as it appears in the photo: identical " +
+    "colour, pattern, texture, graphics, logos and text, identical cut, sleeve length, collar " +
+    "and proportions. Do not redesign it, do not invent or embellish details, do not add or " +
+    "remove features, and do not change the colour."
+  );
+}
 
 /* OpenRouter's Image API returns the image at data[0].b64_json, but different
    routed models/response shapes surface it under slightly different keys. Rather
@@ -1109,7 +1123,7 @@ function findImageB64(node, depth){
 }
 
 /* One garment photo -> one product shot. Returns { url, cost }. Throws readable. */
-async function generateProductShot(photoDataUrl){
+async function generateProductShot(photoDataUrl, item){
   const key = getGenKey();
   if (!key) throw new Error("Add your OpenRouter API key in Profile first.");
   // The model doesn't need full resolution, and a smaller input is cheaper+faster.
@@ -1124,7 +1138,7 @@ async function generateProductShot(photoDataUrl){
     },
     body: JSON.stringify({
       model: getGenModel(),
-      prompt: PRODUCT_SHOT_PROMPT,
+      prompt: productShotPrompt(item),
       input_references: [{ type: "image_url", image_url: { url: small } }],
     }),
   });
@@ -2497,7 +2511,7 @@ function ClosetItemDetail({ item, onClose, onRename, onColor, onType, onTrash, o
   const makeShot = async () => {
     setGenErr(""); setGenBusy(true);
     try {
-      const { url, cost } = await generateProductShot(item.photo);
+      const { url, cost } = await generateProductShot(item.photo, item);
       if (onShot) onShot(item.id, url);
       if (showToast) showToast(cost != null ? `Product shot ready · $${cost.toFixed(3)}` : "Product shot ready");
     } catch (e) {
@@ -4757,7 +4771,7 @@ function App() {
   const maybeAutoShot = (item) => {
     const email = ((user && user.email) || "").toLowerCase();
     if (!UNLOCKED_TEST_EMAILS.has(email) || !getGenKey() || !getGenAuto() || !item || !item.photo || item.shot) return;
-    generateProductShot(item.photo)
+    generateProductShot(item.photo, item)
       .then(({ url }) => setCloset((c) => c.map((i) => i.id === item.id ? { ...i, shot: url } : i)))
       .catch(() => {});
   };
