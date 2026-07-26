@@ -59,7 +59,7 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "fireb
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260725114128";
+const APP_VERSION = "20260725185938";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -269,6 +269,18 @@ const PRESET_TREE = [
     { type: "Thigh-High Socks", shape: "sockThigh", noun: "Thigh-High Socks", variants: [["White Thigh-High Socks","White"],["Black Thigh-High Socks","Black"]] },
   ]},
 ];
+
+/* Attach a preset product-shot image id to every variant, numbered in flatten
+   order (001, 002, …) — this is the exact order the ./presets/NNN.webp files
+   were exported in, so variant N maps to presets/NNN.webp. Stored as a 3rd
+   entry on each [name, color] tuple. A missing file (e.g. 099) just falls back
+   to the tinted silhouette via the <img onError> in PresetThumb. */
+(() => {
+  let _pn = 0;
+  for (const g of PRESET_TREE)
+    for (const t of g.types)
+      for (const v of t.variants) v[2] = "./presets/" + String(++_pn).padStart(3, "0") + ".webp";
+})();
 
 const CAT_ICON = {
   Tops: Shirt, Bottoms: Layers, Shoes: Footprints, Outerwear: Shirt, Accessories: Watch,
@@ -2644,6 +2656,21 @@ function GarmentIcon({ shape, color, size = 46 }) {
   );
 }
 
+/* Preset row thumbnail: the real product shot (./presets/NNN.webp) on a white
+   tile, falling back to the tinted garment silhouette if the image is missing
+   or fails to load (e.g. offline, or the one variant with no shot). */
+function PresetThumb({ img, shape, color, size = 52 }) {
+  const [failed, setFailed] = useState(false);
+  if (!img || failed) return <GarmentIcon shape={shape} color={color} size={size} />;
+  return (
+    <div className="rounded-2xl overflow-hidden flex items-center justify-center shrink-0" style={{ width: size, height: size, background: "#fff" }}>
+      <img src={img} alt="" loading="lazy" width={size} height={size}
+        onError={() => setFailed(true)}
+        style={{ width: size, height: size, objectFit: "contain" }} />
+    </div>
+  );
+}
+
 /* Quick-add preset browser (used in both onboarding and the closet tab). Drills
    down like a closet category: Group -> Type -> Variant, with a Back at each
    level. Tapping + on a variant adds it. onAdd gets a ready-to-store item shape
@@ -2661,11 +2688,11 @@ function PresetPicker({ onAdd, addedNames }) {
         <button onClick={() => setTypeKey(null)} className="flex items-center gap-1.5 text-[13px] font-extrabold mb-1" style={{ color: "#A99FB5" }}>
           <ArrowLeft size={16} /> {group.group}
         </button>
-        {type.variants.map(([name, color]) => {
+        {type.variants.map(([name, color, img]) => {
           const have = addedNames ? addedNames.has(name.toLowerCase()) : false;
           return (
             <div key={name} className="flex items-center gap-3 p-2.5 rounded-2xl" style={{ background: "#fff", border: "1.5px solid #F1E6F1" }}>
-              <GarmentIcon shape={type.shape} color={color} size={44} />
+              <PresetThumb img={img} shape={type.shape} color={color} size={52} />
               <span className="flex-1 text-[14px] font-extrabold min-w-0 truncate" style={{ color: "#5A5167" }}>{name}</span>
               {have && <Check size={16} color="#6BA37C" />}
               <button onClick={() => onAdd({ name, color, category: group.category, subcategory: group.subcategory || null, noun: type.noun })}
@@ -2691,7 +2718,7 @@ function PresetPicker({ onAdd, addedNames }) {
         {group.types.map((t) => (
           <button key={t.type} onClick={() => setTypeKey(t.type)}
             className="w-full flex items-center gap-3 p-2.5 rounded-2xl active:opacity-80" style={{ background: "#fff", border: "1.5px solid #F1E6F1" }}>
-            <GarmentIcon shape={t.shape} color={t.variants[0][1]} size={44} />
+            <PresetThumb img={t.variants[0][2]} shape={t.shape} color={t.variants[0][1]} size={52} />
             <div className="flex-1 text-left min-w-0">
               <div className="text-[14.5px] font-extrabold truncate" style={{ color: "#5A5167" }}>{t.type}</div>
               <div className="text-[12px] font-semibold" style={{ color: "#A99FB5" }}>{plural(t.variants.length, "option")}</div>
@@ -2984,7 +3011,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera, onLearnName, 
               <Plus size={20} color="#7E6AB5" />
             </div>
             <div className="flex-1 text-left">
-              <div className="text-[15px] font-black" style={{ color: "#7E6AB5" }}>Quick add staples</div>
+              <div className="text-[15px] font-black" style={{ color: "#4E3E86" }}>Quick add staples</div>
               <div className="text-[12px] font-bold" style={{ color: "#A99FB5" }}>Add common pieces — no photo needed</div>
             </div>
             <ChevronDown size={20} color="#B9A8D8" style={{ transform: presetsOpen ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
