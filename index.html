@@ -59,7 +59,7 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "fireb
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260727210510";
+const APP_VERSION = "20260728155744";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -213,73 +213,77 @@ const GARMENT_SHAPES = {
    normal (photoless) closet item that feeds outfit generation like any other
    piece. Groups carry the real closet category/subcategory an added item maps to;
    colours are real COLOR_CHOICES names so shape tint + item.color stay in sync. */
+/* Each variant is [name, color, imgId]. imgId is a STABLE preset-image number
+   (./presets/NNN.webp) that never changes when the tree is reordered or items
+   are added/removed — so photos never get remapped. New items get fresh ids
+   (111+); a missing file (e.g. an id whose shot isn't in yet) just falls back
+   to the tinted silhouette via the <img onError> in PresetThumb. Ids need NOT
+   be contiguous or in order. Next free id: 173. */
 const PRESET_TREE = [
   { group: "Tops", icon: Shirt, category: "Tops", types: [
-    { type: "T-Shirt", shape: "tee", noun: "T-Shirt", variants: [["White T-Shirt","White"],["Black T-Shirt","Black"],["Gray T-Shirt","Gray"],["Cream T-Shirt","Cream"],["Baby Blue T-Shirt","Light Blue"],["Brown T-Shirt","Brown"]] },
-    { type: "Tank Top", shape: "tee", noun: "Tank Top", variants: [["White Tank Top","White"],["Black Tank Top","Black"],["Gray Tank Top","Gray"]] },
-    { type: "Crop Top", shape: "tee", noun: "Crop Top", variants: [["White Crop Top","White"],["Black Crop Top","Black"],["Pink Crop Top","Pink"]] },
-    { type: "Button-Up Shirt", shape: "longsleeve", noun: "Button-Up Shirt", variants: [["White Button-Up Shirt","White"],["Light Blue Button-Up Shirt","Light Blue"],["Black Button-Up Shirt","Black"]] },
-    { type: "Blouse", shape: "tee", noun: "Blouse", variants: [["White Blouse","White"],["Black Blouse","Black"],["Cream Blouse","Cream"]] },
-    { type: "Polo Shirt", shape: "tee", noun: "Polo Shirt", variants: [["White Polo Shirt","White"],["Navy Polo Shirt","Navy"],["Black Polo Shirt","Black"]] },
+    { type: "T-Shirt", shape: "tee", noun: "T-Shirt", variants: [["White T-Shirt","White",1],["Black T-Shirt","Black",2],["Gray T-Shirt","Gray",3],["Cream T-Shirt","Cream",4],["Baby Blue T-Shirt","Light Blue",5],["Brown T-Shirt","Brown",6]] },
+    { type: "Off-Shoulder Tee", shape: "tee", noun: "Off-Shoulder Tee", variants: [["White Off-Shoulder Tee","White",117],["Gray Off-Shoulder Tee","Gray",118],["Black Off-Shoulder Tee","Black",119]] },
+    { type: "Baby Tee", shape: "tee", noun: "Baby Tee", variants: [["White Baby Tee","White",120],["Black Baby Tee","Black",121],["Soft Pink Baby Tee","Light Pink",122],["Butter Yellow Baby Tee","Yellow",123],["Sage Green Baby Tee","Olive",124],["Baby Blue Baby Tee","Light Blue",125],["Graphic White Tee","White",126],["Graphic Black Tee","Black",127]] },
+    { type: "Tank Top", shape: "tee", noun: "Tank Top", variants: [["White Tank Top","White",7],["Black Tank Top","Black",8],["Gray Tank Top","Gray",9],["Brown Tank Top","Brown",128],["Baby Pink Tank Top","Light Pink",129],["Baby Blue Tank Top","Light Blue",130],["Butter Yellow Tank Top","Yellow",131]] },
+    { type: "Babydoll Top", shape: "tee", noun: "Babydoll Top", variants: [["White Babydoll Top","White",132],["Baby Pink Babydoll Top","Light Pink",133],["Black Babydoll Top","Black",134],["Polka-Dot Babydoll Top","White",135]] },
+    { type: "Off-Shoulder Knit Top", shape: "longsleeve", noun: "Off-Shoulder Knit Top", variants: [["Gray Off-Shoulder Knit Top","Gray",136],["White Off-Shoulder Knit Top","White",137],["Black Off-Shoulder Knit Top","Black",138],["Tan Off-Shoulder Knit Top","Tan",139],["Beige Off-Shoulder Knit Top","Beige",140],["Cream Off-Shoulder Knit Top","Cream",141],["Ivory Off-Shoulder Knit Top","Cream",142]] },
+    { type: "Polo Shirt", shape: "tee", noun: "Polo Shirt", variants: [["White Polo Shirt","White",19],["Navy Polo Shirt","Navy",20],["Black Polo Shirt","Black",21],["Gray Polo Shirt","Gray",143]] },
   ]},
   { group: "Bottoms", icon: Layers, category: "Bottoms", types: [
-    { type: "Jeans", shape: "pants", noun: "Jeans", variants: [["Light Blue Baggy Jeans","Light Blue"],["Blue Baggy Jeans","Blue"],["Black Baggy Jeans","Black"],["Blue Skinny Jeans","Blue"],["Black Skinny Jeans","Black"],["Blue Straight Jeans","Blue"],["White Straight Jeans","White"]] },
-    { type: "Trousers", shape: "pants", noun: "Trousers", variants: [["Black Trousers","Black"],["Beige Trousers","Beige"],["Gray Trousers","Gray"]] },
-    { type: "Sweatpants", shape: "pants", noun: "Sweatpants", variants: [["Gray Sweatpants","Gray"],["Black Sweatpants","Black"],["Cream Sweatpants","Cream"]] },
-    { type: "Cargo Pants", shape: "pants", noun: "Cargo Pants", variants: [["Khaki Cargo Pants","Beige"],["Black Cargo Pants","Black"],["Olive Cargo Pants","Olive"]] },
-    { type: "Leggings", shape: "pants", noun: "Leggings", variants: [["Black Leggings","Black"],["Gray Leggings","Gray"]] },
-    { type: "Shorts", shape: "shorts", noun: "Shorts", variants: [["Denim Shorts","Blue"],["Black Shorts","Black"],["Beige Shorts","Beige"]] },
-    { type: "Skirt", shape: "skirt", noun: "Skirt", variants: [["Black Mini Skirt","Black"],["Denim Mini Skirt","Blue"],["Pleated Skirt","Gray"],["Black Midi Skirt","Black"]] },
+    { type: "Baggy Jeans", shape: "pants", noun: "Baggy Jeans", variants: [["Light Blue Baggy Jeans","Light Blue",22],["Blue Baggy Jeans","Blue",23],["Black Baggy Jeans","Black",24],["White Baggy Jeans","White",144],["Navy Baggy Jeans","Navy",145]] },
+    { type: "Straight Jeans", shape: "pants", noun: "Straight Jeans", variants: [["Light Blue Straight Jeans","Light Blue",147],["Blue Straight Jeans","Blue",27],["Black Straight Jeans","Black",146],["White Straight Jeans","White",28],["Navy Straight Jeans","Navy",148]] },
+    { type: "Sweatpants", shape: "pants", noun: "Sweatpants", variants: [["Gray Sweatpants","Gray",32],["Black Sweatpants","Black",33],["Navy Sweatpants","Navy",149]] },
+    { type: "Cargo Pants", shape: "pants", noun: "Cargo Pants", variants: [["Khaki Cargo Pants","Beige",35],["Black Cargo Pants","Black",36],["Olive Cargo Pants","Olive",37]] },
+    { type: "Leggings", shape: "pants", noun: "Leggings", variants: [["Black Leggings","Black",38],["Gray Leggings","Gray",39]] },
+    { type: "Denim Shorts", shape: "shorts", noun: "Denim Shorts", variants: [["Blue Denim Shorts","Blue",40],["Black Denim Shorts","Black",41],["Beige Denim Shorts","Beige",42],["White Denim Shorts","White",111]] },
+    { type: "Sweat Shorts", shape: "shorts", noun: "Sweat Shorts", variants: [["White Sweat Shorts","White",112],["Gray Sweat Shorts","Gray",113],["Black Sweat Shorts","Black",114]] },
+    { type: "Skirt", shape: "skirt", noun: "Skirt", variants: [["Black Mini Skirt","Black",43],["Denim Mini Skirt","Blue",44],["Pleated Skirt","Gray",45],["Black Midi Skirt","Black",46]] },
   ]},
   { group: "Outerwear", icon: Shirt, category: "Outerwear", types: [
-    { type: "Hoodie", shape: "longsleeve", noun: "Hoodie", variants: [["Gray Hoodie","Gray"],["Black Hoodie","Black"],["Cream Hoodie","Cream"],["Green Hoodie","Green"]] },
-    { type: "Sweater", shape: "longsleeve", noun: "Knit Sweater", variants: [["Cream Knit Sweater","Cream"],["Gray Knit Sweater","Gray"],["Brown Knit Sweater","Brown"],["Black Knit Sweater","Black"]] },
-    { type: "Cardigan", shape: "longsleeve", noun: "Cardigan", variants: [["Cream Cardigan","Cream"],["Gray Cardigan","Gray"],["Brown Cardigan","Brown"]] },
-    { type: "Denim Jacket", shape: "jacket", noun: "Denim Jacket", variants: [["Blue Denim Jacket","Blue"],["Black Denim Jacket","Black"]] },
-    { type: "Leather Jacket", shape: "jacket", noun: "Leather Jacket", variants: [["Black Leather Jacket","Black"],["Brown Leather Jacket","Brown"]] },
-    { type: "Blazer", shape: "jacket", noun: "Blazer", variants: [["Black Blazer","Black"],["Beige Blazer","Beige"],["Gray Blazer","Gray"]] },
-    { type: "Puffer Jacket", shape: "jacket", noun: "Puffer Jacket", variants: [["Black Puffer Jacket","Black"],["White Puffer Jacket","White"]] },
-    { type: "Trench Coat", shape: "jacket", noun: "Trench Coat", variants: [["Beige Trench Coat","Beige"],["Black Trench Coat","Black"]] },
+    { type: "Hoodie", shape: "longsleeve", noun: "Hoodie", variants: [["Gray Hoodie","Gray",47],["Black Hoodie","Black",48],["Cream Hoodie","Cream",49],["Pink Hoodie","Light Pink",115],["Yellow Hoodie","Yellow",150],["Brown Hoodie","Brown",116],["Blue Hoodie","Blue",151],["Camo Hoodie","Olive",152]] },
+    { type: "Sweater", shape: "longsleeve", noun: "Knit Sweater", variants: [["Cream Knit Sweater","Cream",51],["Gray Knit Sweater","Gray",52],["Brown Knit Sweater","Brown",53],["Black Knit Sweater","Black",54],["Navy Knit Sweater","Navy",153]] },
+    { type: "Cardigan", shape: "longsleeve", noun: "Cardigan", variants: [["Cream Cardigan","Cream",55],["Gray Cardigan","Gray",56],["Brown Cardigan","Brown",57],["Baby Pink Cardigan","Light Pink",154],["Butter Yellow Cardigan","Yellow",155],["Navy Cardigan","Navy",156],["Mint Green Cardigan","Green",157]] },
+    { type: "Puffer Jacket", shape: "jacket", noun: "Puffer Jacket", variants: [["Black Puffer Jacket","Black",65],["White Puffer Jacket","White",66]] },
   ]},
   { group: "Shoes", icon: Footprints, category: "Shoes", types: [
-    { type: "Sneakers", shape: "sneaker", noun: "Sneakers", variants: [["White Sneakers","White"],["Black Sneakers","Black"],["Gray Sneakers","Gray"]] },
-    { type: "Boots", shape: "boot", noun: "Boots", variants: [["Black Boots","Black"],["Brown Boots","Brown"],["Black Ankle Boots","Black"]] },
-    { type: "Loafers", shape: "flat", noun: "Loafers", variants: [["Black Loafers","Black"],["Brown Loafers","Brown"]] },
-    { type: "Ballet Flats", shape: "flat", noun: "Ballet Flats", variants: [["Black Ballet Flats","Black"],["Beige Ballet Flats","Beige"]] },
-    { type: "Sandals", shape: "flat", noun: "Sandals", variants: [["Black Sandals","Black"],["Tan Sandals","Tan"]] },
-    { type: "Heels", shape: "heel", noun: "Heels", variants: [["Black Heels","Black"],["Nude Heels","Beige"]] },
+    { type: "Sneakers", shape: "sneaker", noun: "Sneakers", variants: [["White Sneakers","White",69],["Black Sneakers","Black",70]] },
+    { type: "Converse", shape: "sneaker", noun: "Converse", variants: [["Black Converse","Black",158],["White Converse","White",159]] },
+    { type: "Ugg-Style Boots", shape: "boot", noun: "Ugg-Style Boots", variants: [["Chestnut Ugg-Style Boots","Tan",160],["Black Ugg-Style Boots","Black",161]] },
+    { type: "Platform Boots", shape: "boot", noun: "Platform Boots", variants: [["Black Platform Boots","Black",162]] },
+    { type: "Ankle Boots", shape: "boot", noun: "Ankle Boots", variants: [["Black Ankle Boots","Black",74],["Brown Ankle Boots","Brown",163]] },
+    { type: "Knee-High Boots", shape: "boot", noun: "Knee-High Boots", variants: [["Black Knee-High Boots","Black",164],["Brown Knee-High Boots","Brown",165]] },
+    { type: "Sandals", shape: "flat", noun: "Sandals", variants: [["Tan Sandals","Tan",166],["Black Sandals","Black",167]] },
+    { type: "Clogs", shape: "flat", noun: "Clogs", variants: [["Black Clogs","Black",168],["White Clogs","White",169]] },
+    { type: "Heels", shape: "heel", noun: "Heels", variants: [["Black Heels","Black",81],["Nude Heels","Beige",82]] },
   ]},
   { group: "Bags", icon: ShoppingBag, category: "Accessories", subcategory: "Bags", types: [
-    { type: "Tote Bag", shape: "bag", noun: "Tote Bag", variants: [["Black Tote Bag","Black"],["Beige Tote Bag","Beige"],["Canvas Tote Bag","Cream"]] },
-    { type: "Shoulder Bag", shape: "bag", noun: "Shoulder Bag", variants: [["Black Shoulder Bag","Black"],["Brown Shoulder Bag","Brown"]] },
-    { type: "Crossbody Bag", shape: "bag", noun: "Crossbody Bag", variants: [["Black Crossbody Bag","Black"],["Brown Crossbody Bag","Brown"]] },
+    { type: "Tote Bag", shape: "bag", noun: "Tote Bag", variants: [["Black Tote Bag","Black",83],["Beige Tote Bag","Beige",84],["Cream Tote Bag","Cream",85]] },
+    { type: "Shoulder Bag", shape: "bag", noun: "Shoulder Bag", variants: [["Black Shoulder Bag","Black",86],["Brown Shoulder Bag","Brown",87]] },
+    { type: "Crossbody Bag", shape: "bag", noun: "Crossbody Bag", variants: [["Black Crossbody Bag","Black",88],["Brown Crossbody Bag","Brown",89]] },
+    { type: "Mini Bag", shape: "bag", noun: "Mini Bag", variants: [["Black Mini Bag","Black",170],["Brown Mini Bag","Brown",171],["White Mini Bag","White",172]] },
   ]},
   { group: "Hats", icon: Crown, category: "Accessories", subcategory: "Headwear & Neckwear", types: [
-    { type: "Baseball Cap", shape: "cap", noun: "Baseball Cap", variants: [["Black Baseball Cap","Black"],["White Baseball Cap","White"]] },
-    { type: "Beanie", shape: "beanie", noun: "Beanie", variants: [["Black Beanie","Black"],["Gray Beanie","Gray"],["Cream Beanie","Cream"]] },
+    { type: "Baseball Cap", shape: "cap", noun: "Baseball Cap", variants: [["Black Baseball Cap","Black",90],["White Baseball Cap","White",91]] },
   ]},
   { group: "Belts", icon: Layers, category: "Accessories", subcategory: "Belts", types: [
-    { type: "Thick Belt", shape: "beltThick", noun: "Thick Belt", variants: [["Black Thick Belt","Black"],["Brown Thick Belt","Brown"],["Tan Thick Belt","Tan"]] },
-    { type: "Thin Belt", shape: "beltThin", noun: "Thin Belt", variants: [["Black Thin Belt","Black"],["Brown Thin Belt","Brown"],["Tan Thin Belt","Tan"]] },
+    { type: "Thick Belt", shape: "beltThick", noun: "Thick Belt", variants: [["Black Thick Belt","Black",95],["Brown Thick Belt","Brown",96],["Tan Thick Belt","Tan",97]] },
+    { type: "Thin Belt", shape: "beltThin", noun: "Thin Belt", variants: [["Black Thin Belt","Black",98],["Brown Thin Belt","Brown",99],["Tan Thin Belt","Tan",100]] },
   ]},
   { group: "Socks", icon: Footprints, category: "Accessories", subcategory: "Socks", types: [
-    { type: "Ankle Socks", shape: "sockAnkle", noun: "Ankle Socks", variants: [["White Ankle Socks","White"],["Black Ankle Socks","Black"],["Gray Ankle Socks","Gray"]] },
-    { type: "Crew Socks", shape: "sockCrew", noun: "Crew Socks", variants: [["White Crew Socks","White"],["Black Crew Socks","Black"],["Gray Crew Socks","Gray"]] },
-    { type: "Knee-High Socks", shape: "sockKnee", noun: "Knee-High Socks", variants: [["White Knee-High Socks","White"],["Black Knee-High Socks","Black"]] },
-    { type: "Thigh-High Socks", shape: "sockThigh", noun: "Thigh-High Socks", variants: [["White Thigh-High Socks","White"],["Black Thigh-High Socks","Black"]] },
+    { type: "Ankle Socks", shape: "sockAnkle", noun: "Ankle Socks", variants: [["White Ankle Socks","White",101],["Black Ankle Socks","Black",102],["Gray Ankle Socks","Gray",103]] },
+    { type: "Crew Socks", shape: "sockCrew", noun: "Crew Socks", variants: [["White Crew Socks","White",104],["Black Crew Socks","Black",105],["Gray Crew Socks","Gray",106]] },
+    { type: "Knee-High Socks", shape: "sockKnee", noun: "Knee-High Socks", variants: [["White Knee-High Socks","White",107],["Black Knee-High Socks","Black",108]] },
+    { type: "Thigh-High Socks", shape: "sockThigh", noun: "Thigh-High Socks", variants: [["White Thigh-High Socks","White",109],["Black Thigh-High Socks","Black",110]] },
   ]},
 ];
 
-/* Attach a preset product-shot image id to every variant, numbered in flatten
-   order (001, 002, …) — this is the exact order the ./presets/NNN.webp files
-   were exported in, so variant N maps to presets/NNN.webp. Stored as a 3rd
-   entry on each [name, color] tuple. A missing file (e.g. 099) just falls back
-   to the tinted silhouette via the <img onError> in PresetThumb. */
+/* Turn each variant's stable imgId (3rd tuple entry) into its ./presets/NNN.webp
+   URL in place, so the render code can read v[2] as the image src. Ids are
+   zero-padded to 3 digits; a null/absent id yields no image (silhouette). */
 (() => {
-  let _pn = 0;
   for (const g of PRESET_TREE)
     for (const t of g.types)
-      for (const v of t.variants) v[2] = "./presets/" + String(++_pn).padStart(3, "0") + ".webp";
+      for (const v of t.variants) v[2] = v[2] != null ? "./presets/" + String(v[2]).padStart(3, "0") + ".webp" : null;
 })();
 
 const CAT_ICON = {
