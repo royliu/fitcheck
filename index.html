@@ -59,7 +59,7 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "fireb
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260725185938";
+const APP_VERSION = "20260727210510";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -1561,6 +1561,9 @@ function occasionAffinity(item, occText){
    opts.baseStyle: "Cali" | "Korean" — picks the model photo set + note flavor. */
 function buildOutfits(closet, likedAesthetics, favorites, opts){
   opts = opts || {};
+  // Items in the laundry are unavailable to wear — drop them from the pool
+  // entirely so the stylist never builds a look around a dirty piece.
+  closet = (closet||[]).filter(i=>!i.wash);
   const byCat=c=>closet.filter(i=>i.category===c);
   const tops=byCat("Tops"),bottoms=byCat("Bottoms"),shoes=byCat("Shoes"),
         outer=byCat("Outerwear"),acc=byCat("Accessories");
@@ -1597,7 +1600,12 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
   // looks every time. It's too small to override a real aesthetic/occasion signal.
   const jitterMap = new Map();
   const jitter = (id) => { if(!jitterMap.has(id)) jitterMap.set(id, (Math.random()-0.5)*0.8); return jitterMap.get(id); };
-  const score=(it,aes)=> 2.4*aestheticAffinity(it,aes) + occasionAffinity(it,opts.occasion) + iScore(it.id) + (it.fav?0.6:0) + (favItemIds.has(it.id)?0.6:0) + jitter(it.id);
+  // Liked pieces (heart in the closet) and pieces from favorited outfits get a
+  // moderate boost so the stylist clearly leans toward what the user loves —
+  // enough to win most near-equal ties, but small enough that a liked piece is
+  // favored, NOT guaranteed into every look, and never overrides a real
+  // aesthetic/occasion mismatch.
+  const score=(it,aes)=> 2.4*aestheticAffinity(it,aes) + occasionAffinity(it,opts.occasion) + iScore(it.id) + (it.fav?0.2:0) + (favItemIds.has(it.id)?0.15:0) + jitter(it.id);
   const rankedFor=(arr,aes)=>[...arr].sort((a,b)=>score(b,aes)-score(a,aes));
   const isDress=it=>!!it && /dress/i.test((it.noun||"")+" "+(it.name||""));
   // Up to 2 accessories from DIFFERENT sub-categories (never two bags). The
@@ -1625,8 +1633,8 @@ function buildOutfits(closet, likedAesthetics, favorites, opts){
       // rather than falling back to the disallowed item.
       if (!ok.length) return null;
       const stable = [...ok].sort((a, b) =>
-        (iScore(b.id) + (b.fav?0.6:0) + (favItemIds.has(b.id)?0.6:0)) -
-        (iScore(a.id) + (a.fav?0.6:0) + (favItemIds.has(a.id)?0.6:0)));
+        (iScore(b.id) + (b.fav?0.2:0) + (favItemIds.has(b.id)?0.15:0)) -
+        (iScore(a.id) + (a.fav?0.2:0) + (favItemIds.has(a.id)?0.15:0)));
       return { sub, stable, aesBest: score(rankedFor(ok, aes)[0], aes) };
     }).filter(Boolean).sort((a, b) => b.aesBest - a.aesBest);   // which sub-categories lead is still aesthetic-aware
     const out = [];
@@ -2315,7 +2323,9 @@ function StylistTab({ closet, favorites, toggleFav, prefs, weather, onRate, onDi
     setTried(true);
     setOutfits([]);
     // Looks the user leans toward: favorited outfits' aesthetics + profile picks.
-    const favAesthetics = favorites.map((f) => f.aesthetic);
+    // Strip any base-style prefix ("Cali · Streetwear" -> "Streetwear") so the
+    // bare aesthetic name matches AESTHETICS and actually steers the next looks.
+    const favAesthetics = favorites.map((f) => (f.aesthetic || "").split(" · ").pop());
     const likedAesthetics = new Set([...favAesthetics, ...(prefs?.aesthetics || [])]);
     const occ = custom.trim() || occasion;
     setTimeout(() => {
