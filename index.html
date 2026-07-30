@@ -59,7 +59,7 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "fireb
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260728155744";
+const APP_VERSION = "20260730111516";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -226,7 +226,7 @@ const PRESET_TREE = [
     { type: "Baby Tee", shape: "tee", noun: "Baby Tee", variants: [["White Baby Tee","White",120],["Black Baby Tee","Black",121],["Soft Pink Baby Tee","Light Pink",122],["Butter Yellow Baby Tee","Yellow",123],["Sage Green Baby Tee","Olive",124],["Baby Blue Baby Tee","Light Blue",125],["Graphic White Tee","White",126],["Graphic Black Tee","Black",127]] },
     { type: "Tank Top", shape: "tee", noun: "Tank Top", variants: [["White Tank Top","White",7],["Black Tank Top","Black",8],["Gray Tank Top","Gray",9],["Brown Tank Top","Brown",128],["Baby Pink Tank Top","Light Pink",129],["Baby Blue Tank Top","Light Blue",130],["Butter Yellow Tank Top","Yellow",131]] },
     { type: "Babydoll Top", shape: "tee", noun: "Babydoll Top", variants: [["White Babydoll Top","White",132],["Baby Pink Babydoll Top","Light Pink",133],["Black Babydoll Top","Black",134],["Polka-Dot Babydoll Top","White",135]] },
-    { type: "Off-Shoulder Knit Top", shape: "longsleeve", noun: "Off-Shoulder Knit Top", variants: [["Gray Off-Shoulder Knit Top","Gray",136],["White Off-Shoulder Knit Top","White",137],["Black Off-Shoulder Knit Top","Black",138],["Tan Off-Shoulder Knit Top","Tan",139],["Beige Off-Shoulder Knit Top","Beige",140],["Cream Off-Shoulder Knit Top","Cream",141],["Ivory Off-Shoulder Knit Top","Cream",142]] },
+    { type: "Off-Shoulder Knit Top", shape: "longsleeve", noun: "Off-Shoulder Knit Top", variants: [["Gray Off-Shoulder Knit Top","Gray",136],["White Off-Shoulder Knit Top","White",137],["Black Off-Shoulder Knit Top","Black",138],["Tan Off-Shoulder Knit Top","Tan",139],["Cream Off-Shoulder Knit Top","Cream",141],["Ivory Off-Shoulder Knit Top","Cream",142]] },
     { type: "Polo Shirt", shape: "tee", noun: "Polo Shirt", variants: [["White Polo Shirt","White",19],["Navy Polo Shirt","Navy",20],["Black Polo Shirt","Black",21],["Gray Polo Shirt","Gray",143]] },
   ]},
   { group: "Bottoms", icon: Layers, category: "Bottoms", types: [
@@ -248,7 +248,7 @@ const PRESET_TREE = [
   { group: "Shoes", icon: Footprints, category: "Shoes", types: [
     { type: "Sneakers", shape: "sneaker", noun: "Sneakers", variants: [["White Sneakers","White",69],["Black Sneakers","Black",70]] },
     { type: "Converse", shape: "sneaker", noun: "Converse", variants: [["Black Converse","Black",158],["White Converse","White",159]] },
-    { type: "Ugg-Style Boots", shape: "boot", noun: "Ugg-Style Boots", variants: [["Chestnut Ugg-Style Boots","Tan",160],["Black Ugg-Style Boots","Black",161]] },
+    { type: "Boots", shape: "boot", noun: "Boots", variants: [["Chestnut Boots","Tan",160],["Black Boots","Black",161]] },
     { type: "Platform Boots", shape: "boot", noun: "Platform Boots", variants: [["Black Platform Boots","Black",162]] },
     { type: "Ankle Boots", shape: "boot", noun: "Ankle Boots", variants: [["Black Ankle Boots","Black",74],["Brown Ankle Boots","Brown",163]] },
     { type: "Knee-High Boots", shape: "boot", noun: "Knee-High Boots", variants: [["Black Knee-High Boots","Black",164],["Brown Knee-High Boots","Brown",165]] },
@@ -2709,7 +2709,7 @@ function PresetPicker({ onAdd, addedNames }) {
               <PresetThumb img={img} shape={type.shape} color={color} size={52} />
               <span className="flex-1 text-[14px] font-extrabold min-w-0 truncate" style={{ color: "#5A5167" }}>{name}</span>
               {have && <Check size={16} color="#6BA37C" />}
-              <button onClick={() => onAdd({ name, color, category: group.category, subcategory: group.subcategory || null, noun: type.noun })}
+              <button onClick={() => onAdd({ name, color, category: group.category, subcategory: group.subcategory || null, noun: type.noun, photo: img || null })}
                 aria-label={"add " + name}
                 className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0"
                 style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
@@ -2811,7 +2811,7 @@ function ClosetTab({ closet, setCloset, trash, setTrash, goCamera, onLearnName, 
   const [presetsOpen, setPresetsOpen] = useState(false);
   const addedNames = new Set(closet.map((i) => (i.name || "").toLowerCase()));
   const addPreset = (it) => {
-    setCloset((c) => [{ id: uid(), name: it.name, category: it.category, subcategory: it.subcategory || null, color: it.color, noun: it.noun || null, photo: null, fav: false, wash: false }, ...c]);
+    setCloset((c) => [{ id: uid(), name: it.name, category: it.category, subcategory: it.subcategory || null, color: it.color, noun: it.noun || null, photo: it.photo || null, fav: false, wash: false }, ...c]);
     showToast && showToast(`${it.name} added`);
   };
   const detailItem = detailId ? closet.find((i) => i.id === detailId) : null;
