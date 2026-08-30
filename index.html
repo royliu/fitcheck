@@ -59,7 +59,7 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "fireb
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260830131737";
+const APP_VERSION = "20260830164023";
 
 /* ---------- Environment ----------
    PROD is the real site at fitcheck.is; anything else (localhost, a LAN IP, a
@@ -86,7 +86,7 @@ const IS_PROD = ENV === "prod";
    Config values are safe to keep in client code — they identify the project,
    they aren't secret keys. Real access control lives in Firestore's security
    rules (only a signed-in user can read/write their own data). */
-const firebaseConfig = {
+const PROD_FIREBASE_CONFIG = {
   apiKey: "AIzaSyB5CxnSAlUYJljYDgtXMpL7MQu_jA8akPI",
   authDomain: "fitcheck-app-ab0f2.firebaseapp.com",
   projectId: "fitcheck-app-ab0f2",
@@ -95,6 +95,17 @@ const firebaseConfig = {
   appId: "1:848570439706:web:b7328b222677ef8eec99a3",
   measurementId: "G-E56LBZ3955",
 };
+
+/* Development/test Firebase project. Keeping dev on its OWN project means test
+   accounts, throwaway closets and destructive-flow testing (reset, delete
+   account) can never touch real users' data.
+   Paste the dev project's web config here to activate it — until then dev falls
+   back to the production project and the on-screen badge warns "PROD DATA". */
+const DEV_FIREBASE_CONFIG = null;
+
+// True whenever we're talking to the real production database.
+const USING_PROD_DATA = IS_PROD || !DEV_FIREBASE_CONFIG;
+const firebaseConfig = USING_PROD_DATA ? PROD_FIREBASE_CONFIG : DEV_FIREBASE_CONFIG;
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
@@ -4988,12 +4999,20 @@ createRoot(document.getElementById("root")).render(<ErrorBoundary><App /></Error
    React so it can't be affected by app state, and never rendered in prod. */
 if (!IS_PROD) {
   const badge = document.createElement("div");
-  badge.textContent = ENV.toUpperCase();
-  badge.title = "FitCheck " + ENV + " — analytics disabled · build " + APP_VERSION;
+  // Red "PROD DATA" warning while dev still points at the production database —
+  // that's the state where a destructive test would hit real users' data.
+  const onProdData = USING_PROD_DATA;
+  badge.textContent = ENV.toUpperCase() + (onProdData ? " · PROD DATA" : "");
+  badge.title = "FitCheck " + ENV + " — analytics disabled · "
+    + (onProdData ? "WARNING: using the PRODUCTION database (set DEV_FIREBASE_CONFIG)"
+                  : "dev database (" + firebaseConfig.projectId + ")")
+    + " · build " + APP_VERSION;
   badge.style.cssText = [
     "position:fixed", "left:8px", "bottom:8px", "z-index:2147483647",
-    "background:#5A5167", "color:#fff", "font:700 10px/1 ui-sans-serif,system-ui,sans-serif",
-    "letter-spacing:.08em", "padding:5px 7px", "border-radius:6px", "opacity:.65",
+    "background:" + (onProdData ? "#B3261E" : "#5A5167"),
+    "color:#fff", "font:700 10px/1 ui-sans-serif,system-ui,sans-serif",
+    "letter-spacing:.08em", "padding:5px 7px", "border-radius:6px",
+    "opacity:" + (onProdData ? ".9" : ".65"),
     "pointer-events:none", "user-select:none",
   ].join(";");
   document.body.appendChild(badge);
