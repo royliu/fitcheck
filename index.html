@@ -59,7 +59,7 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "fireb
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260730111516";
+const APP_VERSION = "20260830130335";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -1149,7 +1149,7 @@ async function generateProductShot(photoDataUrl, item){
     headers: {
       "Authorization": "Bearer " + key,
       "Content-Type": "application/json",
-      "HTTP-Referer": "https://royliu.github.io/fitcheck/",
+      "HTTP-Referer": "https://fitcheck.is/",
       "X-Title": "FitCheck",
     },
     body: JSON.stringify({
@@ -2685,6 +2685,30 @@ function PresetThumb({ img, shape, color, size = 52 }) {
   );
 }
 
+/* Turn a preset's product shot into a data URL so an added staple carries a real
+   photo like a camera-captured item — it then thumbnails, opens full-size and
+   syncs through exactly the same paths, instead of falling back to a silhouette.
+   These tiles are only a few KB, so inlining them is cheap. Returns null on any
+   failure (offline, missing file) and the item just behaves as a photoless one. */
+async function presetPhotoDataUrl(url) {
+  if (!url) return null;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const raw = await res.blob();
+    // Force the MIME type rather than trusting the server's Content-Type — a
+    // host that serves .webp as octet-stream would otherwise produce a data URL
+    // some browsers refuse to render in an <img>.
+    const blob = new Blob([raw], { type: "image/webp" });
+    return await new Promise((resolve) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => resolve(null);
+      fr.readAsDataURL(blob);
+    });
+  } catch (e) { return null; }
+}
+
 /* Quick-add preset browser (used in both onboarding and the closet tab). Drills
    down like a closet category: Group -> Type -> Variant, with a Back at each
    level. Tapping + on a variant adds it. onAdd gets a ready-to-store item shape
@@ -2709,7 +2733,7 @@ function PresetPicker({ onAdd, addedNames }) {
               <PresetThumb img={img} shape={type.shape} color={color} size={52} />
               <span className="flex-1 text-[14px] font-extrabold min-w-0 truncate" style={{ color: "#5A5167" }}>{name}</span>
               {have && <Check size={16} color="#6BA37C" />}
-              <button onClick={() => onAdd({ name, color, category: group.category, subcategory: group.subcategory || null, noun: type.noun, photo: img || null })}
+              <button onClick={async () => onAdd({ name, color, category: group.category, subcategory: group.subcategory || null, noun: type.noun, photo: (await presetPhotoDataUrl(img)) || img || null })}
                 aria-label={"add " + name}
                 className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0"
                 style={{ background: "linear-gradient(160deg,#FDE9F1,#F1ECFB)" }}>
@@ -3927,7 +3951,7 @@ function ProfileTab({ aesthetics, setAesthetics, favorites, toggleFav, tryNew, s
   const shareBonusesToday = (usage && usage.shareBonuses) || 0;
   const shareCapped = shareBonusesToday >= MAX_SHARE_BONUSES_PER_DAY;
   const handleShare = async () => {
-    const shareData = { title: "FitCheck", text: "Hey! I've been using this app called FitCheck to style my outfits — click this link to help give me more outfit generations! 💕", url: "https://royliu.github.io/fitcheck/" };
+    const shareData = { title: "FitCheck", text: "Hey! I've been using this app called FitCheck to style my outfits — click this link to help give me more outfit generations! 💕", url: "https://fitcheck.is/" };
     try {
       if (navigator.share) await navigator.share(shareData);
       else if (navigator.clipboard) { await navigator.clipboard.writeText(shareData.url); }
