@@ -59,7 +59,28 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "fireb
 
 /* Stamped with a fresh value at every deploy (see the deploy script) — lets a
    tab that's been open across a deploy notice a newer build is live. */
-const APP_VERSION = "20260830130335";
+const APP_VERSION = "20260830131737";
+
+/* ---------- Environment ----------
+   PROD is the real site at fitcheck.is; anything else (localhost, a LAN IP, a
+   file:// open, an old github.io URL) is treated as development/test. This is
+   derived from the hostname rather than a build flag so the SAME file behaves
+   correctly wherever it's opened — no separate dev build to keep in sync, and
+   no risk of shipping a file accidentally left in "dev" mode.
+   What it gates: analytics (dev traffic must never inflate the real user
+   counts) and the on-screen environment badge. */
+const PROD_HOSTS = ["fitcheck.is", "www.fitcheck.is"];
+const ENV = (() => {
+  try {
+    const h = (location.hostname || "").toLowerCase();
+    if (PROD_HOSTS.includes(h)) return "prod";
+    if (!h || h === "localhost" || h === "127.0.0.1" || h === "[::1]" ||
+        h.endsWith(".local") || /^192\.168\./.test(h) || /^10\./.test(h) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(h)) return "dev";
+    return "preview";                       // some other host — treat as non-prod
+  } catch (e) { return "dev"; }
+})();
+const IS_PROD = ENV === "prod";
 
 /* ---------- Firebase (real cross-device accounts) ----------
    Config values are safe to keep in client code — they identify the project,
@@ -85,9 +106,14 @@ const db = getFirestore(firebaseApp);
    failure here must never break the app. Once live it auto-collects
    first_visit / session_start / page_view (that alone answers "how many people
    use FitCheck"); track() below adds a few high-signal custom events. No PII is
-   ever sent — event names and counts only, never emails, photos, or closet data. */
+   ever sent — event names and counts only, never emails, photos, or closet data.
+   PRODUCTION ONLY: development and test traffic (localhost, LAN, previews) is
+   never sent, so reloading the app while working on it can't inflate the real
+   user counts in GA4. */
 let _analytics = null;
-analyticsSupported().then((ok) => { if (ok) { try { _analytics = getAnalytics(firebaseApp); } catch (e) {} } }).catch(() => {});
+if (IS_PROD) {
+  analyticsSupported().then((ok) => { if (ok) { try { _analytics = getAnalytics(firebaseApp); } catch (e) {} } }).catch(() => {});
+}
 function track(name, params) { try { if (_analytics) logEvent(_analytics, name, params || {}); } catch (e) {} }
 const googleProvider = new GoogleAuthProvider();
 // Always show Google's account chooser instead of silently reusing whichever
@@ -4956,6 +4982,22 @@ class ErrorBoundary extends React.Component {
 const loadingEl = document.getElementById("loading");
 if (loadingEl) loadingEl.remove();
 createRoot(document.getElementById("root")).render(<ErrorBoundary><App /></ErrorBoundary>);
+
+/* Non-production builds get a small corner badge, so a dev/test tab is never
+   mistaken for the live site (they look identical otherwise). Injected outside
+   React so it can't be affected by app state, and never rendered in prod. */
+if (!IS_PROD) {
+  const badge = document.createElement("div");
+  badge.textContent = ENV.toUpperCase();
+  badge.title = "FitCheck " + ENV + " — analytics disabled · build " + APP_VERSION;
+  badge.style.cssText = [
+    "position:fixed", "left:8px", "bottom:8px", "z-index:2147483647",
+    "background:#5A5167", "color:#fff", "font:700 10px/1 ui-sans-serif,system-ui,sans-serif",
+    "letter-spacing:.08em", "padding:5px 7px", "border-radius:6px", "opacity:.65",
+    "pointer-events:none", "user-select:none",
+  ].join(";");
+  document.body.appendChild(badge);
+}
 
 </script>
 </body>
